@@ -1,0 +1,47 @@
+# Unique name for this instance;
+# This will be used to create a MQTT topic and as part of Home Assistant
+# sensor names.
+name: sunspec1
+
+# Settings for the MQTT connection
+mqtt_config:
+    host: mqtt.example.com
+
+    #topic_base: subspec_pub
+    #discovery_base: homeassistant
+    #discovery_node: pv2mqtt
+
+connections:
+    # One entry for each RS485 connection (TCP or RTU)
+    
+    # For Modbus-TCP:
+    #my_modbus_tcp:
+    #  type: tcp
+    #  ip_address: 192.0.2.2
+    #  port: 502
+
+    # For Modbus-RTU (RS485)
+    #my_modbus_rtu:
+    #  type: rtu
+    #  device: /dev/ttyUSB0
+    #  baudrate: 9600
+    #  parity: N
+
+       # This option is valid for both RTU and TCP:
+       #timeout_seconds: 10    
+
+devices:
+    # One entry for each SunSpec-compatible device.
+    #
+    # If multiple devices use the same connection, they will be polled
+    # sequentially.
+    
+    #- connection: my_modbus_rtu
+       # This is also known as "client id" or "slave id".
+       # Defaults to 1
+       #device_id: 10
+
+       # How often to check for and publish new data.
+       # Some devices only publish new values every few minutes.
+       # Defaults to 10 seconds.
+       #poll_interval_seconds: 300
