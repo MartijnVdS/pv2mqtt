@@ -80,7 +80,7 @@ The program has been tested with the following devices:
 
 | Device | Type | Comment |
 |-|-|-|
-| AP Systems YC600 | Micro inverter | Works
+| AP Systems YC600 | Micro inverter | Works (via ECU-R-Pro) |
 
 ## Links
 
