@@ -7,7 +7,11 @@ name: sunspec1
 mqtt_config:
     host: mqtt.example.com
 
-    #topic_base: subspec_pub
+    # Optional:
+    #username: my_username
+    #password: super_secret1
+
+    #topic_base: pv2mqtt
     #discovery_base: homeassistant
     #discovery_node: pv2mqtt
 
@@ -35,7 +39,7 @@ devices:
     #
     # If multiple devices use the same connection, they will be polled
     # sequentially.
-    
+
     #- connection: my_modbus_rtu
        # This is also known as "client id" or "slave id".
        # Defaults to 1
