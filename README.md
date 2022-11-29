@@ -5,12 +5,13 @@
 Publish data from SunSpec-compliant inverters to an MQTT broker, including
 Home Assistant MQTT discovery.
 
-I made this so I can have all data of my PV inverters together in once place
-on a local machine, instead of using a different API (and possibly cloud service)
-for each one. It also allows multiple "readers" to use the data without conflict.
+This service allows me to have all of the data of my PV inverters together in
+once place on a local machine, instead of using a different API (and possibly
+cloud service) for each one. It also allows multiple "readers" to use the data
+without conflict.
 
-One `pv2mqtt` instance can poll multiple devices and the refresh interval is
-configurable per device.
+One `pv2mqtt` instance can poll multiple devices on multiple buses and the
+refresh interval is configurable per device.
 
 ## Configuration
 
@@ -23,11 +24,15 @@ data from.
 
 In addition, you may need to set up a user account on your MQTT broker.
 
-## Building/installing
+## Building/installing/running
 
-The easiest way to run `pv2pqtt` is to build a container:
+The easiest way to run `pv2pqtt` is to use a container:
 
 ```shell
+$ docker pull martijnvds/pv2mqtt:latest
+$ # (images are available for amd64 and arm64)
+
+$ # Or build it yourself:
 $ docker build -t pv2mqtt .
 ```
 
@@ -35,39 +40,36 @@ This way, you will always have a supported Python version, and you won't clutter
 up the system with dependencies.
 
 It's also possible to install the dependencies manually, outside of a container
-by using something like `pip install -r requirements.txt`.
+by using the included  `requirements.txt`.
 
-## Running
-
-You can run the container by running :
+Once you've downloaded or built the container, you can run it:
 
 ```shell
 $ docker run --rm \
     --volume $(pwd)/pv2mqtt.yml:/pv2mqtt.yml:ro \
-    pv2mqtt
+    martijnvds/pv2mqtt:latest
 ```
 
-This make the configuration file available in the container as `/pv2mqtt.yml`.
-The container is built with to automatically start `pv2mqtt` with that
-configuration file. You can override the configuration file location by
-specifying a different one on the command line:
+This makes the configuration file available in the container as `/pv2mqtt.yml`.
+The container is built with to automatically start `pv2mqtt` using that
+configuration file. You can specify a different one on the command line:
 
 ```shell
 $ docker run --rm \
     --volume $(pwd)/pv2mqtt.yml:/etc/pv2mqtt.yml:ro \
-    pv2mqtt \
+    martijnvds/pv2mqtt:latest \
     /etc/pv2mqtt.yml
 ```
 
-If you use a serial connection, you also need to pass through the serial device
-to the container at startup. Make sure you use the same device name in your
-configuration file!
+If you use a serial (RS-485) connection, you also need to pass through the
+serial device to the container at startup. Make sure you use the same device
+name in your configuration file!
 
 ```shell
 $ docker run --rm \
     --volume=$(pwd)/pv2mqtt.yml:/pv2mqtt.yml:ro \
     --device=/dev/ttyUSB0:/dev/ttyUSB0:rw \
-    pv2mqtt
+    martijnvds/pv2mqtt:latest
 ```
 
 ## Limitations
@@ -84,5 +86,6 @@ The program has been tested with the following devices:
 
 ## Links
 
+* [Docker hub](https://hub.docker.com/r/martijnvds/pv2mqtt) - Container images
 * [pysunspec2](https://github.com/sunspec/pysunspec2) - SunSpec library that does the heavy lifting.
 * [Home Assistant SunSpec integration](https://github.com/CJNE/ha-sunspec) - Alternative if all your inverters support Modbus-TCP and you only need your data in Home Assistant.
