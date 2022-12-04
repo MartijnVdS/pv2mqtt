@@ -326,9 +326,6 @@ class MQTT:
         self.config = config
 
     def connect(self) -> None:
-        def on_connect(client, userdata, flags, rc):
-            print("Connected with result code " + str(rc))
-
         mqtt = mqtt_client.Client()
         mqtt.enable_logger(logger)
 
@@ -348,7 +345,8 @@ class MQTT:
         "Publish inverter data to MQTT"
 
         mqtt_topic = self._data_topic(serial)
-        self.mqtt.publish(mqtt_topic, data)
+        rv = self.mqtt.publish(mqtt_topic, data, qos=2)
+        rv.wait_for_publish()
 
     def publish_discovery(
         self,
@@ -364,7 +362,9 @@ class MQTT:
             discovery_topic = (
                 f"{discovery_base}/sensor/{inverter.serial}/{field}/config"
             )
-            rv = self.mqtt.publish(discovery_topic, data.json(), retain=True)
+            rv = self.mqtt.publish(
+                discovery_topic, data.json(), qos=2, retain=True
+            )
             rv.wait_for_publish()
 
 
