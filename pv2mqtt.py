@@ -176,7 +176,6 @@ class HADevice(pydantic.BaseModel):
 class HADiscoveryData(pydantic.BaseModel):
     device: HADevice
     enabled_by_default: bool
-    entity_category: str
     name: str
     state_class: str
     state_topic: str
@@ -311,7 +310,6 @@ class SunSpecInverter:
             data[field] = HADiscoveryData(
                 device=device_meta,
                 enabled_by_default=extra.get("enabled_by_default", False),
-                entity_category=extra.get("entity_category", "diagnostic"),
                 name=field_model.field_info.title or "",
                 state_class=extra["state_class"],
                 state_topic=state_topic,
