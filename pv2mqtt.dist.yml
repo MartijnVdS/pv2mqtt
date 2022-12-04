@@ -1,11 +1,7 @@
-# Unique name for this instance;
-# This will be used to create a MQTT topic and as part of Home Assistant
-# sensor names.
-name: sunspec1
-
 # Settings for the MQTT connection
 mqtt_config:
     host: mqtt.example.com
+    port: 1883
 
     # Optional:
     #username: my_username

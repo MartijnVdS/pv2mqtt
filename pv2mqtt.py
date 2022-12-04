@@ -241,7 +241,7 @@ class DeviceConfig(pydantic.BaseModel):
 
 class MQTTConfig(pydantic.BaseModel):
     host: str
-    port: int = 1833
+    port: int = 1883
 
     username: None | str
     password: None | str
