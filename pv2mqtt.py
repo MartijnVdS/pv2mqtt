@@ -13,6 +13,10 @@ import time
 import yaml
 from typing import Literal
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 
