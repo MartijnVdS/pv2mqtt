@@ -7,16 +7,14 @@ import pydantic
 import pydantic.fields
 import queue
 import sunspec2.modbus.client as sunspec_client
+import sunspec2.modbus.modbus as sunspec_modbus
 import sys
 import threading
 import time
 import yaml
 from typing import Literal
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -179,7 +177,9 @@ class HADevice(pydantic.BaseModel):
 
 class HADiscoveryData(pydantic.BaseModel):
     device: HADevice
+    device_class: str
     enabled_by_default: bool
+    force_update: bool
     name: str
     state_class: str
     state_topic: str
@@ -313,6 +313,7 @@ class SunSpecInverter:
             extra = field_model.field_info.extra
             data[field] = HADiscoveryData(
                 device=device_meta,
+                device_class=extra["device_class"],
                 enabled_by_default=extra.get("enabled_by_default", False),
                 force_update=True,
                 name=field_model.field_info.title or "",
@@ -330,9 +331,18 @@ class MQTT:
     def __init__(self, config: MQTTConfig):
         self.config = config
 
+    @staticmethod
+    def on_mqtt_disconnect(client, userdata, rc):
+        if rc != 0:
+            logger.warning(
+                "MQTT got disconnected. Will automatically reconnect."
+            )
+
     def connect(self) -> None:
         mqtt = mqtt_client.Client()
         mqtt.enable_logger(logger)
+
+        mqtt.on_disconnect = self.on_mqtt_disconnect
 
         if self.config.username:
             mqtt.username_pw_set(self.config.username, self.config.password)
@@ -394,13 +404,20 @@ def run_polling_loop(
             "Refreshing data for "
             f"{device.manufacturer} {device.model} {device.serial}"
         )
-        with lock:
-            device.refresh()
-            inverter_data = device.inverter_data
 
-        result_queue.put(
-            Result(serial=device.serial, inverter_data=inverter_data)
-        )
+        try:
+            with lock:
+                device.refresh()
+                inverter_data = device.inverter_data
+
+            result_queue.put(
+                Result(serial=device.serial, inverter_data=inverter_data)
+            )
+        except sunspec_modbus.ModbusClientError as exc:
+            logger.warning(
+                f"Error retrieving inverter data: {exc}"
+                " (a timeout is normal when it's dark outside)"
+            )
 
         time.sleep(poll_interval_seconds)
 
