@@ -95,7 +95,7 @@ class InverterData(pydantic.BaseModel):
         title="Energy",
         enabled_by_default=True,
         device_class="energy",
-        unit_of_measurement="WH",
+        unit_of_measurement="Wh",
         state_class="total_increasing",
         value_template="{{ value_json.WH }}",
     )
