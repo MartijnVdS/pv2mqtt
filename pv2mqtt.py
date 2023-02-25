@@ -318,7 +318,7 @@ class SunSpecInverter:
                 state_class=extra["state_class"],
                 state_topic=state_topic,
                 unit_of_measurement=extra.get("unit_of_measurement", " "),
-                unique_id=f"{self.serial}-{field}",
+                unique_id=f"pv2mqtt_{self.serial}_{field}",
                 value_template=extra.get("value_template", ""),
             )
 
