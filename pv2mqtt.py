@@ -446,7 +446,7 @@ def main(config: Settings):
         t.start()
 
     while queue_item := result_queue.get():
-        logger.info("Publishing data for {queue_item.serial} to MQTT")
+        logger.info(f"Publishing data for {queue_item.serial} to MQTT")
         mqtt.publish_data(queue_item.serial, queue_item.inverter_data.json())
 
         result_queue.task_done()
