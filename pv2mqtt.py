@@ -99,9 +99,9 @@ class InverterData(pydantic.BaseModel):
         title="Energy",
         enabled_by_default=True,
         device_class="energy",
-        unit_of_measurement="Wh",
+        unit_of_measurement="kWh",
         state_class="total_increasing",
-        value_template="{{ value_json.WH }}",
+        value_template="{{ value_json.WH / 1000 | round(3) }}",
     )
     PF: float | None = pydantic.Field(
         None,
@@ -314,6 +314,7 @@ class SunSpecInverter:
             data[field] = HADiscoveryData(
                 device=device_meta,
                 enabled_by_default=extra.get("enabled_by_default", False),
+                force_update=True,
                 name=field_model.field_info.title or "",
                 state_class=extra["state_class"],
                 state_topic=state_topic,
