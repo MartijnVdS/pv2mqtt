@@ -381,10 +381,14 @@ def run_polling_loop(
     device: SunSpecInverter,
     poll_interval_seconds: int,
 ):
-    logger.debug(
+    logger.info(
         f"Starting polling loop: {device.serial} every {poll_interval_seconds}"
     )
     while True:
+        logger.info(
+            "Refreshing data for "
+            f"{device.manufacturer} {device.model} {device.serial}"
+        )
         with lock:
             device.refresh()
             inverter_data = device.inverter_data
@@ -438,6 +442,7 @@ def main(config: Settings):
         t.start()
 
     while queue_item := result_queue.get():
+        logger.info("Publishing data for {queue_item.serial} to MQTT")
         mqtt.publish_data(queue_item.serial, queue_item.inverter_data.json())
 
         result_queue.task_done()
