@@ -402,7 +402,6 @@ def run_polling_loop(
     logger.info(
         f"Starting polling loop: {device.serial} every {poll_interval_seconds}"
     )
-    needs_connect = True
 
     while True:
         logger.info(
@@ -411,10 +410,7 @@ def run_polling_loop(
         )
 
         try:
-            if needs_connect:
-                logger.info("Connecting to SunSpec device")
-                device.connect()
-                needs_connect = False
+            device.connect()
 
             with lock:
                 device.refresh()
@@ -425,11 +421,6 @@ def run_polling_loop(
             )
         except sunspec_modbus.ModbusClientError as exc:
             logger.warning(f"Error retrieving inverter data: {exc}")
-
-            # Force re-connecting on the next read, because exceptions do
-            # not clear the SunSpec library's internal "connected" state
-            # properly.
-            needs_connect = True
 
         time.sleep(poll_interval_seconds)
 
