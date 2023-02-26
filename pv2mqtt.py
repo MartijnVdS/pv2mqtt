@@ -287,6 +287,9 @@ class SunSpecInverter:
                 self.model_id = model_id
                 break
 
+    def connect(self) -> None:
+        self.device.connect()
+
     def refresh(self) -> None:
         "Refresh the model's data."
         model = self.device.models[self.model_id][0]
@@ -399,6 +402,8 @@ def run_polling_loop(
     logger.info(
         f"Starting polling loop: {device.serial} every {poll_interval_seconds}"
     )
+    needs_connect = True
+
     while True:
         logger.info(
             "Refreshing data for "
@@ -406,6 +411,11 @@ def run_polling_loop(
         )
 
         try:
+            if needs_connect:
+                logger.info("Connecting to SunSpec device")
+                device.connect()
+                needs_connect = False
+
             with lock:
                 device.refresh()
                 inverter_data = device.inverter_data
@@ -414,10 +424,12 @@ def run_polling_loop(
                 Result(serial=device.serial, inverter_data=inverter_data)
             )
         except sunspec_modbus.ModbusClientError as exc:
-            logger.warning(
-                f"Error retrieving inverter data: {exc}"
-                " (a timeout is normal when it's dark outside)"
-            )
+            logger.warning(f"Error retrieving inverter data: {exc}")
+
+            # Force re-connecting on the next read, because exceptions do
+            # not clear the SunSpec library's internal "connected" state
+            # properly.
+            needs_connect = True
 
         time.sleep(poll_interval_seconds)
 
