@@ -419,7 +419,7 @@ def run_polling_loop(
             result_queue.put(
                 Result(serial=device.serial, inverter_data=inverter_data)
             )
-        except sunspec_modbus.ModbusClientError as exc:
+        except (ConnectionError, sunspec_modbus.ModbusClientError) as exc:
             logger.warning(f"Error retrieving inverter data: {exc}")
 
         time.sleep(poll_interval_seconds)
