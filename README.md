@@ -29,7 +29,7 @@ In addition, you may need to set up a user account on your MQTT broker.
 The easiest way to run `pv2pqtt` is to use a container:
 
 ```shell
-$ docker pull martijnvds/pv2mqtt:latest
+$ docker pull ghcr.io/martijnvds/pv2mqtt:latest
 $ # (images are available for amd64, arm64 and arm/v7)
 
 $ # Or build it yourself:
@@ -69,7 +69,7 @@ name in your configuration file!
 $ docker run --rm \
     --volume=$(pwd)/pv2mqtt.yml:/pv2mqtt.yml:ro \
     --device=/dev/ttyUSB0:/dev/ttyUSB0:rw \
-    martijnvds/pv2mqtt:latest
+    ghcr.io/martijnvds/pv2mqtt:latest
 ```
 
 ## Limitations
@@ -86,6 +86,5 @@ The program has been tested with the following devices:
 
 ## Links
 
-* [Docker hub](https://hub.docker.com/r/martijnvds/pv2mqtt) - Container images
 * [pysunspec2](https://github.com/sunspec/pysunspec2) - SunSpec library that does the heavy lifting.
 * [Home Assistant SunSpec integration](https://github.com/CJNE/ha-sunspec) - Alternative if all your inverters support Modbus-TCP and you only need your data in Home Assistant.
