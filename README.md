@@ -30,7 +30,7 @@ The easiest way to run `pv2pqtt` is to use a container:
 
 ```shell
 $ docker pull ghcr.io/martijnvds/pv2mqtt:latest
-$ # (images are available for amd64, arm64 and arm/v7)
+$ # (images are available for amd64, i386, arm64 and arm/v7)
 
 $ # Or build it yourself:
 $ docker build -t pv2mqtt .
