@@ -19,6 +19,10 @@ connections:
     #  type: tcp
     #  ip_address: 192.0.2.2
     #  port: 502
+    #  # reuse_connection -
+    #  # If true, existing TCP connection is reused
+    #  # If false, connection is closed and re-opened every time through the polling loop
+    #  reuse_connection: True
 
     # For Modbus-RTU (RS485)
     #my_modbus_rtu:

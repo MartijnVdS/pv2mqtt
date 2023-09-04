@@ -190,6 +190,7 @@ class HADiscoveryData(pydantic.BaseModel):
 
 class ModbusConnectionConfigBase(pydantic.BaseModel, abc.ABC):
     timeout_seconds: int = 10
+    reuse_connection: bool = True
 
     device_type: Literal["inverter"] = pydantic.Field("inverter")
 
@@ -289,6 +290,12 @@ class SunSpecInverter:
 
     def connect(self) -> None:
         self.device.connect()
+
+    def is_connected(self) -> bool:
+        return self.device.is_connected()
+
+    def disconnect(self) -> None:
+        self.device.disconnect()
 
     def refresh(self) -> None:
         "Refresh the model's data."
@@ -398,6 +405,7 @@ def run_polling_loop(
     result_queue: queue.Queue[Result],
     device: SunSpecInverter,
     poll_interval_seconds: int,
+    reuse_connection: bool,
 ):
     logger.info(
         f"Starting polling loop: {device.serial} every {poll_interval_seconds}"
@@ -410,16 +418,22 @@ def run_polling_loop(
         )
 
         try:
-            device.connect()
-
             with lock:
-                device.refresh()
-                inverter_data = device.inverter_data
+                if not reuse_connection or not device.is_connected():
+                    device.connect()
 
-            result_queue.put(
-                Result(serial=device.serial, inverter_data=inverter_data)
-            )
+                    device.refresh()
+                    inverter_data = device.inverter_data
+
+                result_queue.put(
+                    Result(serial=device.serial, inverter_data=inverter_data)
+                )
+
+                if not reuse_connection:
+                    device.disconnect()
+
         except (ConnectionError, sunspec_modbus.ModbusClientError) as exc:
+            device.disconnect()
             logger.warning(f"Error retrieving inverter data: {exc}")
 
         time.sleep(poll_interval_seconds)
@@ -459,6 +473,7 @@ def main(config: Settings):
                     "result_queue": result_queue,
                     "device": inverter,
                     "poll_interval_seconds": device_cfg.poll_interval_seconds,
+                    "reuse_connection": connection_cfg.reuse_connection,
                 },
             )
             polling_threads.append(polling_thread)
