@@ -82,7 +82,8 @@ The program has been tested with the following devices:
 
 | Device | Type | Comment |
 |-|-|-|
-| AP Systems YC600 | Micro inverter | Works (via ECU-R-Pro) |
+| AP Systems YC600 | Micro inverter with external monitoring box | Works (via ECU-R-Pro); make sure Modbus is enabled; default TCP port is 502 |
+| SolarEdge SE3680H-RW000BNN4 | "Regular" inverter | Works over wifi, should also work over wired ethernet and RTU; for wifi/ethernet usage, Modbus-TCP needs to be enabled; default TCP port is 1502 |
 
 ## Links
 
