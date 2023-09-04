@@ -21,142 +21,174 @@ logger = logging.getLogger(__name__)
 class InverterData(pydantic.BaseModel):
     AphA: float | None = pydantic.Field(
         None,
-        title="Phase A current",
-        device_class="current",
-        unit_of_measurement="A",
-        state_class="measurement",
-        value_template="{{ value_json.AphA }}",
+        json_schema_extra={
+            "title": "Phase A current",
+            "device_class": "current",
+            "unit_of_measurement": "A",
+            "state_class": "measurement",
+            "value_template": "{{ value_json.AphA }}",
+        },
     )
     AphB: float | None = pydantic.Field(
         None,
-        title="Phase B current",
-        device_class="current",
-        unit_of_measurement="A",
-        state_class="measurement",
-        value_template="{{ value_json.AphB }}",
+        json_schema_extra={
+            "title": "Phase B current",
+            "device_class": "current",
+            "unit_of_measurement": "A",
+            "state_class": "measurement",
+            "value_template": "{{ value_json.AphB }}",
+        },
     )
     AphC: float | None = pydantic.Field(
         None,
-        title="Phase C current",
-        device_class="current",
-        unit_of_measurement="A",
-        state_class="measurement",
-        value_template="{{ value_json.AphC }}",
+        json_schema_extra={
+            "title": "Phase C current",
+            "device_class": "current",
+            "unit_of_measurement": "A",
+            "state_class": "measurement",
+            "value_template": "{{ value_json.AphC }}",
+        },
     )
     PhVphA: float | None = pydantic.Field(
         None,
-        title="AC Voltage AN",
-        device_class="voltage",
-        unit_of_measurement="V",
-        state_class="measurement",
-        value_template="{{ value_json.PhVphA }}",
+        json_schema_extra={
+            "title": "AC Voltage AN",
+            "device_class": "voltage",
+            "unit_of_measurement": "V",
+            "state_class": "measurement",
+            "value_template": "{{ value_json.PhVphA }}",
+        },
     )
     PhVphB: float | None = pydantic.Field(
         None,
-        title="AC Voltage BN",
-        device_class="voltage",
-        unit_of_measurement="V",
-        state_class="measurement",
-        value_template="{{ value_json.PhVphB }}",
+        json_schema_extra={
+            "title": "AC Voltage BN",
+            "device_class": "voltage",
+            "unit_of_measurement": "V",
+            "state_class": "measurement",
+            "value_template": "{{ value_json.PhVphB }}",
+        },
     )
     PhVphC: float | None = pydantic.Field(
         None,
-        title="AC Voltage CN",
-        device_class="voltage",
-        unit_of_measurement="V",
-        state_class="measurement",
-        value_template="{{ value_json.PhVphC }}",
+        json_schema_extra={
+            "title": "AC Voltage CN",
+            "device_class": "voltage",
+            "unit_of_measurement": "V",
+            "state_class": "measurement",
+            "value_template": "{{ value_json.PhVphC }}",
+        },
     )
     W: float | None = pydantic.Field(
         None,
-        title="Power",
-        enabled_by_default=True,
-        device_class="power",
-        unit_of_measurement="W",
-        state_class="measurement",
-        value_template="{{ value_json.W }}",
+        json_schema_extra={
+            "title": "Power",
+            "enabled_by_default": True,
+            "device_class": "power",
+            "unit_of_measurement": "W",
+            "state_class": "measurement",
+            "value_template": "{{ value_json.W }}",
+        },
     )
     VA: float | None = pydantic.Field(
         None,
-        title="Apparent power",
-        device_class="apparent_power",
-        unit_of_measurement="VA",
-        state_class="measurement",
-        value_template="{{ value_json.VA }}",
+        json_schema_extra={
+            "title": "Apparent power",
+            "device_class": "apparent_power",
+            "unit_of_measurement": "VA",
+            "state_class": "measurement",
+            "value_template": "{{ value_json.VA }}",
+        },
     )
     VAr: float | None = pydantic.Field(
         None,
-        title="Reactive power",
-        device_class="reactive_power",
-        unit_of_measurement="var",
-        state_class="measurement",
-        value_template="{{ value_json.VAr }}",
+        json_schema_extra={
+            "title": "Reactive power",
+            "device_class": "reactive_power",
+            "unit_of_measurement": "var",
+            "state_class": "measurement",
+            "value_template": "{{ value_json.VAr }}",
+        },
     )
     WH: float | None = pydantic.Field(
         None,
-        title="Energy",
-        enabled_by_default=True,
-        device_class="energy",
-        unit_of_measurement="kWh",
-        state_class="total_increasing",
-        value_template="{{ value_json.WH / 1000 | round(3) }}",
+        json_schema_extra={
+            "title": "Energy",
+            "enabled_by_default": True,
+            "device_class": "energy",
+            "unit_of_measurement": "kWh",
+            "state_class": "total_increasing",
+            "value_template": "{{ value_json.WH / 1000 | round(3) }}",
+        },
     )
     PF: float | None = pydantic.Field(
         None,
-        title="Power factor (cos φ)",
-        device_class="power_factor",
-        state_class="measurement",
-        value_template="{{ value_json.PF * 100 }}",
+        json_schema_extra={
+            "title": "Power factor (cos φ)",
+            "device_class": "power_factor",
+            "state_class": "measurement",
+            "value_template": "{{ value_json.PF * 100 }}",
+        },
     )
     Hz: float | None = pydantic.Field(
         None,
-        title="Grid frequency",
-        device_class="frequency",
-        unit_of_measurement="Hz",
-        state_class="measurement",
-        value_template="{{ value_json.Hz }}",
+        json_schema_extra={
+            "title": "Grid frequency",
+            "device_class": "frequency",
+            "unit_of_measurement": "Hz",
+            "state_class": "measurement",
+            "value_template": "{{ value_json.Hz }}",
+        },
     )
     TmpCab: float | None = pydantic.Field(
         None,
-        title="Cabinet temperature",
-        device_class="temperature",
-        unit_of_measurement="°C",
-        state_class="measurement",
-        value_template="{{ value_json.TmpCab }}",
+        json_schema_extra={
+            "title": "Cabinet temperature",
+            "device_class": "temperature",
+            "unit_of_measurement": "°C",
+            "state_class": "measurement",
+            "value_template": "{{ value_json.TmpCab }}",
+        },
     )
     TmpSnk: float | None = pydantic.Field(
         None,
-        title="Heat sink temperature",
-        device_class="temperature",
-        unit_of_measurement="°C",
-        state_class="measurement",
-        value_template="{{ value_json.TmpSnk }}",
+        json_schema_extra={
+            "title": "Heat sink temperature",
+            "device_class": "temperature",
+            "unit_of_measurement": "°C",
+            "state_class": "measurement",
+            "value_template": "{{ value_json.TmpSnk }}",
+        },
     )
     TmpTrns: float | None = pydantic.Field(
         None,
-        title="Transformer temperature",
-        device_class="temperature",
-        unit_of_measurement="°C",
-        state_class="measurement",
-        value_template="{{ value_json.TmpTrns }}",
+        json_schema_extra={
+            "title": "Transformer temperature",
+            "device_class": "temperature",
+            "unit_of_measurement": "°C",
+            "state_class": "measurement",
+            "value_template": "{{ value_json.TmpTrns }}",
+        },
     )
     TmpOt: float | None = pydantic.Field(
         None,
-        title="Other temperature",
-        device_class="temperature",
-        unit_of_measurement="°C",
-        state_class="measurement",
-        value_template="{{ value_json.TmpOt }}",
+        json_schema_extra={
+            "title": "Other temperature",
+            "device_class": "temperature",
+            "unit_of_measurement": "°C",
+            "state_class": "measurement",
+            "value_template": "{{ value_json.TmpOt }}",
+        },
     )
 
     @classmethod
     def from_sunspec_model(
         cls, model: sunspec_client.SunSpecModbusClientModel
     ):
-        return cls.parse_obj(
+        return cls.model_validate(
             {
                 field: getattr(model, field).cvalue
-                for field in cls.__fields__.keys()
+                for field in cls.model_fields.keys()
             }
         )
 
@@ -248,8 +280,8 @@ class MQTTConfig(pydantic.BaseModel):
     host: str
     port: int = 1883
 
-    username: None | str
-    password: None | str
+    username: None | str = None
+    password: None | str = None
 
     topic_base: str = "pv2mqtt"
     discovery_base: str = "homeassistant"
@@ -319,14 +351,16 @@ class SunSpecInverter:
         data: dict[str, HADiscoveryData] = {}
         device_meta = self._ha_device_meta()
 
-        for field, field_model in InverterData.__fields__.items():
-            extra = field_model.field_info.extra
+        for field, field_model in InverterData.model_fields.items():
+            extra = field_model.json_schema_extra
+            assert isinstance(extra, dict)
+
             data[field] = HADiscoveryData(
                 device=device_meta,
                 device_class=extra["device_class"],
                 enabled_by_default=extra.get("enabled_by_default", False),
                 force_update=True,
-                name=field_model.field_info.title or "",
+                name=field_model.title or "",
                 state_class=extra["state_class"],
                 state_topic=state_topic,
                 unit_of_measurement=extra.get("unit_of_measurement", " "),
@@ -388,7 +422,7 @@ class MQTT:
                 f"{discovery_base}/sensor/{inverter.serial}/{field}/config"
             )
             rv = self.mqtt.publish(
-                discovery_topic, data.json(), qos=2, retain=True
+                discovery_topic, data.model_dump_json(), qos=2, retain=True
             )
             rv.wait_for_publish()
 
@@ -397,7 +431,7 @@ def load_config(config_file: str) -> Settings:
     with open(config_file, "rb") as cfg:
         raw_config = yaml.load(cfg, yaml.Loader)
 
-    return Settings.parse_obj(raw_config)
+    return Settings.model_validate(raw_config)
 
 
 def run_polling_loop(
@@ -422,8 +456,8 @@ def run_polling_loop(
                 if not reuse_connection or not device.is_connected():
                     device.connect()
 
-                    device.refresh()
-                    inverter_data = device.inverter_data
+                device.refresh()
+                inverter_data = device.inverter_data
 
                 result_queue.put(
                     Result(serial=device.serial, inverter_data=inverter_data)
