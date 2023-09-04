@@ -442,7 +442,7 @@ def run_polling_loop(
     reuse_connection: bool,
 ):
     logger.info(
-        f"Starting polling loop: {device.serial} every {poll_interval_seconds}"
+        f"Starting polling loop: {device.serial} every {poll_interval_seconds}s"
     )
 
     while True:
@@ -453,7 +453,7 @@ def run_polling_loop(
 
         try:
             with lock:
-                if not reuse_connection or not device.is_connected():
+                if not device.is_connected():
                     device.connect()
 
                 device.refresh()
@@ -517,7 +517,9 @@ def main(config: Settings):
 
     while queue_item := result_queue.get():
         logger.info(f"Publishing data for {queue_item.serial} to MQTT")
-        mqtt.publish_data(queue_item.serial, queue_item.inverter_data.json())
+        mqtt.publish_data(
+            queue_item.serial, queue_item.inverter_data.model_dump_json()
+        )
 
         result_queue.task_done()
 
