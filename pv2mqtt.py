@@ -12,7 +12,7 @@ import sys
 import threading
 import time
 import yaml
-from typing import Literal
+from typing import Literal, cast
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -182,14 +182,9 @@ class InverterData(pydantic.BaseModel):
     )
 
     @classmethod
-    def from_sunspec_model(
-        cls, model: sunspec_client.SunSpecModbusClientModel
-    ):
+    def from_sunspec_model(cls, model: sunspec_client.SunSpecModbusClientModel):
         return cls.model_validate(
-            {
-                field: getattr(model, field).cvalue
-                for field in cls.model_fields.keys()
-            }
+            {field: getattr(model, field).cvalue for field in cls.model_fields.keys()}
         )
 
 
@@ -227,9 +222,7 @@ class ModbusConnectionConfigBase(pydantic.BaseModel, abc.ABC):
     device_type: Literal["inverter"] = pydantic.Field("inverter")
 
     @abc.abstractmethod
-    def connect(
-        self, device_id: int
-    ) -> sunspec_client.SunSpecModbusClientDevice:
+    def connect(self, device_id: int) -> sunspec_client.SunSpecModbusClientDevice:
         pass
 
 
@@ -238,9 +231,7 @@ class ModbusTCPDeviceConfig(ModbusConnectionConfigBase):
     ip_address: ipaddress.IPv4Address | ipaddress.IPv6Address
     port: int = 502
 
-    def connect(
-        self, device_id: int
-    ) -> sunspec_client.SunSpecModbusClientDeviceTCP:
+    def connect(self, device_id: int) -> sunspec_client.SunSpecModbusClientDeviceTCP:
         return sunspec_client.SunSpecModbusClientDeviceTCP(
             slave_id=device_id,
             ipaddr=str(self.ip_address),
@@ -255,9 +246,7 @@ class ModbusRTUDeviceConfig(ModbusConnectionConfigBase):
     baudrate: int = 9600
     parity: Literal["N"] | Literal["E"] = "N"
 
-    def connect(
-        self, device_id: int
-    ) -> sunspec_client.SunSpecModbusClientDeviceRTU:
+    def connect(self, device_id: int) -> sunspec_client.SunSpecModbusClientDeviceRTU:
         return sunspec_client.SunSpecModbusClientDeviceRTU(
             slave_id=device_id,
             name=self.device,
@@ -345,9 +334,7 @@ class SunSpecInverter:
             name=f"Inverter {self.serial}",
         )
 
-    def ha_discovery_data(
-        self, state_topic: str
-    ) -> dict[str, HADiscoveryData]:
+    def ha_discovery_data(self, state_topic: str) -> dict[str, HADiscoveryData]:
         data: dict[str, HADiscoveryData] = {}
         device_meta = self._ha_device_meta()
 
@@ -357,15 +344,15 @@ class SunSpecInverter:
 
             data[field] = HADiscoveryData(
                 device=device_meta,
-                device_class=extra["device_class"],
-                enabled_by_default=extra.get("enabled_by_default", False),
+                device_class=cast(str, extra["device_class"]),
+                enabled_by_default=cast(bool, extra.get("enabled_by_default", False)),
                 force_update=True,
                 name=field_model.title or "",
-                state_class=extra["state_class"],
+                state_class=cast(str, extra["state_class"]),
                 state_topic=state_topic,
-                unit_of_measurement=extra.get("unit_of_measurement", " "),
+                unit_of_measurement=cast(str, extra.get("unit_of_measurement", " ")),
                 unique_id=f"pv2mqtt_{self.serial}_{field}",
-                value_template=extra.get("value_template", ""),
+                value_template=cast(str, extra.get("value_template", "")),
             )
 
         return data
@@ -378,9 +365,7 @@ class MQTT:
     @staticmethod
     def on_mqtt_disconnect(client, userdata, rc):
         if rc != 0:
-            logger.warning(
-                "MQTT got disconnected. Will automatically reconnect."
-            )
+            logger.warning("MQTT got disconnected. Will automatically reconnect.")
 
     def connect(self) -> None:
         mqtt = mqtt_client.Client()
@@ -413,9 +398,7 @@ class MQTT:
     ) -> None:
         discovery_base = self.config.discovery_base
 
-        discovery_data = inverter.ha_discovery_data(
-            self._data_topic(inverter.serial)
-        )
+        discovery_data = inverter.ha_discovery_data(self._data_topic(inverter.serial))
 
         for field, data in discovery_data.items():
             discovery_topic = (
@@ -517,9 +500,7 @@ def main(config: Settings):
 
     while queue_item := result_queue.get():
         logger.info(f"Publishing data for {queue_item.serial} to MQTT")
-        mqtt.publish_data(
-            queue_item.serial, queue_item.inverter_data.model_dump_json()
-        )
+        mqtt.publish_data(queue_item.serial, queue_item.inverter_data.model_dump_json())
 
         result_queue.task_done()
 

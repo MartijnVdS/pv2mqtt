@@ -1,6 +1,33 @@
-[tool.isort]
-profile = "black"
-no_sections = true
+[project]
+name = "pv2mqtt"
+version = "0.1.0"
 
-[tool.black]
-line-length = 79
+dependencies = [
+    "annotated-types~=0.5",
+    "paho-mqtt~=1.6",
+    "pydantic~=2.4",
+    "pydantic_core~=2.6",
+    "pyflakes~=3.1",
+    "pyserial~=3.5",
+    "pysunspec2~=1.0",
+    "PyYAML~=6.0",
+    "types-paho-mqtt~=1.6",
+    "types-PyYAML~=6.0",
+    "typing_extensions~=4.7",
+]
+
+[project.optional-dependencies]
+dev = ['mypy~=1.5', 'mypy-extensions~=1.0', 'ruff~=0.4.8']
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+fixable = ["ALL"]
+unfixable = []
+
+select = ["E4", "E7", "E9", "F", "I", "C901"]
+ignore = []
+
+[tool.ruff.lint.isort]
+no-sections = true
