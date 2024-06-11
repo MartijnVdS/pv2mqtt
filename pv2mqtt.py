@@ -2,17 +2,18 @@ import abc
 import dataclasses
 import ipaddress
 import logging
-import paho.mqtt.client as mqtt_client
-import pydantic
-import pydantic.fields
 import queue
-import sunspec2.modbus.client as sunspec_client
-import sunspec2.modbus.modbus as sunspec_modbus
 import sys
 import threading
 import time
-import yaml
 from typing import Literal, cast
+
+import paho.mqtt.client as mqtt_client
+import pydantic
+import pydantic.fields
+import sunspec2.modbus.client as sunspec_client
+import sunspec2.modbus.modbus as sunspec_modbus
+import yaml
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -21,8 +22,8 @@ logger = logging.getLogger(__name__)
 class InverterData(pydantic.BaseModel):
     AphA: float | None = pydantic.Field(
         None,
+        title="Phase A current",
         json_schema_extra={
-            "title": "Phase A current",
             "device_class": "current",
             "unit_of_measurement": "A",
             "state_class": "measurement",
@@ -31,8 +32,8 @@ class InverterData(pydantic.BaseModel):
     )
     AphB: float | None = pydantic.Field(
         None,
+        title="Phase B current",
         json_schema_extra={
-            "title": "Phase B current",
             "device_class": "current",
             "unit_of_measurement": "A",
             "state_class": "measurement",
@@ -41,8 +42,8 @@ class InverterData(pydantic.BaseModel):
     )
     AphC: float | None = pydantic.Field(
         None,
+        title="Phase C current",
         json_schema_extra={
-            "title": "Phase C current",
             "device_class": "current",
             "unit_of_measurement": "A",
             "state_class": "measurement",
@@ -51,8 +52,8 @@ class InverterData(pydantic.BaseModel):
     )
     PhVphA: float | None = pydantic.Field(
         None,
+        title="AC Voltage AN",
         json_schema_extra={
-            "title": "AC Voltage AN",
             "device_class": "voltage",
             "unit_of_measurement": "V",
             "state_class": "measurement",
@@ -61,8 +62,8 @@ class InverterData(pydantic.BaseModel):
     )
     PhVphB: float | None = pydantic.Field(
         None,
+        title="AC Voltage BN",
         json_schema_extra={
-            "title": "AC Voltage BN",
             "device_class": "voltage",
             "unit_of_measurement": "V",
             "state_class": "measurement",
@@ -71,8 +72,8 @@ class InverterData(pydantic.BaseModel):
     )
     PhVphC: float | None = pydantic.Field(
         None,
+        title="AC Voltage CN",
         json_schema_extra={
-            "title": "AC Voltage CN",
             "device_class": "voltage",
             "unit_of_measurement": "V",
             "state_class": "measurement",
@@ -81,8 +82,8 @@ class InverterData(pydantic.BaseModel):
     )
     W: float | None = pydantic.Field(
         None,
+        title="Power",
         json_schema_extra={
-            "title": "Power",
             "enabled_by_default": True,
             "device_class": "power",
             "unit_of_measurement": "W",
@@ -92,8 +93,8 @@ class InverterData(pydantic.BaseModel):
     )
     VA: float | None = pydantic.Field(
         None,
+        title="Apparent power",
         json_schema_extra={
-            "title": "Apparent power",
             "device_class": "apparent_power",
             "unit_of_measurement": "VA",
             "state_class": "measurement",
@@ -102,8 +103,8 @@ class InverterData(pydantic.BaseModel):
     )
     VAr: float | None = pydantic.Field(
         None,
+        title="Reactive power",
         json_schema_extra={
-            "title": "Reactive power",
             "device_class": "reactive_power",
             "unit_of_measurement": "var",
             "state_class": "measurement",
@@ -112,8 +113,8 @@ class InverterData(pydantic.BaseModel):
     )
     WH: float | None = pydantic.Field(
         None,
+        title="Energy",
         json_schema_extra={
-            "title": "Energy",
             "enabled_by_default": True,
             "device_class": "energy",
             "unit_of_measurement": "kWh",
@@ -123,8 +124,8 @@ class InverterData(pydantic.BaseModel):
     )
     PF: float | None = pydantic.Field(
         None,
+        title="Power factor (cos φ)",
         json_schema_extra={
-            "title": "Power factor (cos φ)",
             "device_class": "power_factor",
             "state_class": "measurement",
             "value_template": "{{ value_json.PF * 100 }}",
@@ -132,8 +133,8 @@ class InverterData(pydantic.BaseModel):
     )
     Hz: float | None = pydantic.Field(
         None,
+        title="Grid frequency",
         json_schema_extra={
-            "title": "Grid frequency",
             "device_class": "frequency",
             "unit_of_measurement": "Hz",
             "state_class": "measurement",
@@ -142,8 +143,8 @@ class InverterData(pydantic.BaseModel):
     )
     TmpCab: float | None = pydantic.Field(
         None,
+        title="Cabinet temperature",
         json_schema_extra={
-            "title": "Cabinet temperature",
             "device_class": "temperature",
             "unit_of_measurement": "°C",
             "state_class": "measurement",
@@ -152,8 +153,8 @@ class InverterData(pydantic.BaseModel):
     )
     TmpSnk: float | None = pydantic.Field(
         None,
+        title="Heat sink temperature",
         json_schema_extra={
-            "title": "Heat sink temperature",
             "device_class": "temperature",
             "unit_of_measurement": "°C",
             "state_class": "measurement",
@@ -162,8 +163,8 @@ class InverterData(pydantic.BaseModel):
     )
     TmpTrns: float | None = pydantic.Field(
         None,
+        title="Transformer temperature",
         json_schema_extra={
-            "title": "Transformer temperature",
             "device_class": "temperature",
             "unit_of_measurement": "°C",
             "state_class": "measurement",
@@ -172,8 +173,8 @@ class InverterData(pydantic.BaseModel):
     )
     TmpOt: float | None = pydantic.Field(
         None,
+        title="Other temperature",
         json_schema_extra={
-            "title": "Other temperature",
             "device_class": "temperature",
             "unit_of_measurement": "°C",
             "state_class": "measurement",
