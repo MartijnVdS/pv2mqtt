@@ -1,3 +1,7 @@
 .venv
 .mypy_cache
 pv2mqtt.yml
+
+# Added by cargo
+
+/target

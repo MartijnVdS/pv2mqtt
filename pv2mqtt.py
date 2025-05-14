@@ -2,18 +2,16 @@ import abc
 import dataclasses
 import ipaddress
 import logging
+import paho.mqtt.client as mqtt_client
+import pydantic
 import queue
+import sunspec2.modbus.client as sunspec_client
+import sunspec2.modbus.modbus as sunspec_modbus
 import sys
 import threading
 import time
-from typing import Literal, cast
-
-import paho.mqtt.client as mqtt_client
-import pydantic
-import pydantic.fields
-import sunspec2.modbus.client as sunspec_client
-import sunspec2.modbus.modbus as sunspec_modbus
 import yaml
+from typing import Literal, cast, override
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -232,6 +230,7 @@ class ModbusTCPDeviceConfig(ModbusConnectionConfigBase):
     ip_address: ipaddress.IPv4Address | ipaddress.IPv6Address
     port: int = 502
 
+    @override
     def connect(self, device_id: int) -> sunspec_client.SunSpecModbusClientDeviceTCP:
         return sunspec_client.SunSpecModbusClientDeviceTCP(
             slave_id=device_id,
@@ -247,6 +246,7 @@ class ModbusRTUDeviceConfig(ModbusConnectionConfigBase):
     baudrate: int = 9600
     parity: Literal["N"] | Literal["E"] = "N"
 
+    @override
     def connect(self, device_id: int) -> sunspec_client.SunSpecModbusClientDeviceRTU:
         return sunspec_client.SunSpecModbusClientDeviceRTU(
             slave_id=device_id,
@@ -290,7 +290,6 @@ class SunSpecInverter:
     def __init__(self, device: sunspec_client.SunSpecModbusClientDevice):
         self.device = device
 
-    def setup(self) -> None:
         self.device.scan()
 
         common_model = self.device.models["common"][0]
@@ -307,7 +306,7 @@ class SunSpecInverter:
             # Some inverters have both, so we explicitly only use the first
             # one we find.
             if model_id in self.device.models:
-                self.model_id = model_id
+                self.model_id: int = model_id
                 break
 
     def connect(self) -> None:
@@ -319,12 +318,12 @@ class SunSpecInverter:
     def disconnect(self) -> None:
         self.device.disconnect()
 
-    def refresh(self) -> None:
+    def refresh_inverter_data(self) -> InverterData:
         "Refresh the model's data."
         model = self.device.models[self.model_id][0]
         model.read()
 
-        self.inverter_data = InverterData.from_sunspec_model(model)
+        return InverterData.from_sunspec_model(model)
 
     def _ha_device_meta(self) -> HADevice:
         return HADevice(
@@ -362,6 +361,7 @@ class SunSpecInverter:
 class MQTT:
     def __init__(self, config: MQTTConfig):
         self.config = config
+        self.mqtt: mqtt_client.Client
 
     @staticmethod
     def on_mqtt_disconnect(client, userdata, rc):
@@ -431,8 +431,7 @@ def run_polling_loop(
 
     while True:
         logger.info(
-            "Refreshing data for "
-            f"{device.manufacturer} {device.model} {device.serial}"
+            f"Refreshing data for {device.manufacturer} {device.model} {device.serial}"
         )
 
         try:
@@ -440,8 +439,7 @@ def run_polling_loop(
                 if not device.is_connected():
                     device.connect()
 
-                device.refresh()
-                inverter_data = device.inverter_data
+                inverter_data = device.refresh_inverter_data()
 
                 result_queue.put(
                     Result(serial=device.serial, inverter_data=inverter_data)
@@ -479,7 +477,6 @@ def main(config: Settings):
         for device_cfg in devices_by_connection[connection_name]:
             device = connection_cfg.connect(device_id=device_cfg.device_id)
             inverter = SunSpecInverter(device=device)
-            inverter.setup()
 
             mqtt.publish_discovery(inverter)
 
