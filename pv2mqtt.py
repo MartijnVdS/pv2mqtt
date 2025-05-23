@@ -11,7 +11,7 @@ import sys
 import threading
 import time
 import yaml
-from typing import Literal, cast, override
+from typing import ClassVar, Final, Literal, cast, override
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -127,6 +127,7 @@ class InverterData(pydantic.BaseModel):
             "device_class": "power_factor",
             "state_class": "measurement",
             "value_template": "{{ value_json.PF * 100 }}",
+            "unit_of_measurement": " ",
         },
     )
     Hz: float | None = pydantic.Field(
@@ -187,10 +188,47 @@ class InverterData(pydantic.BaseModel):
         )
 
 
+class InverterControlData(pydantic.BaseModel):
+    Conn: bool | None = pydantic.Field(
+        default=None,
+        title="Connection control",
+        json_schema_extra={
+            "type": "switch",
+            "enabled_by_default": False,
+        },
+    )
+    WMaxLimPct: float | None = pydantic.Field(
+        default=None,
+        title="Maximum Power Output limit",
+        json_schema_extra={
+            "type": "number",
+            "unit_of_measurement": "%",
+            "enabled_by_default": False,
+            "min": 0,
+            "max": 100,
+        },
+    )
+    WMaxLim_Ena: bool | None = pydantic.Field(
+        default=None,
+        title="Maximum Power Output limit enabled",
+        json_schema_extra={
+            "type": "switch",
+            "enabled_by_default": False,
+        },
+    )
+
+    @classmethod
+    def from_sunspec_model(cls, model: sunspec_client.SunSpecModbusClientModel):
+        return cls.model_validate(
+            {field: getattr(model, field).cvalue for field in cls.model_fields.keys()}
+        )
+
+
 @dataclasses.dataclass
 class Result:
     serial: str
     inverter_data: InverterData
+    inverter_control_data: InverterControlData | None
 
 
 class HADevice(pydantic.BaseModel):
@@ -201,17 +239,47 @@ class HADevice(pydantic.BaseModel):
     sw_version: str
 
 
-class HADiscoveryData(pydantic.BaseModel):
+class HASensorDiscoveryData(pydantic.BaseModel):
+    entity_type: ClassVar[Final] = "sensor"
     device: HADevice
+    name: str
     device_class: str
     enabled_by_default: bool
     force_update: bool
-    name: str
     state_class: str
     state_topic: str
     unit_of_measurement: str
     unique_id: str
     value_template: str
+
+
+class HANumberDiscoveryData(pydantic.BaseModel):
+    entity_type: ClassVar[Final] = "number"
+
+    device: HADevice
+    name: str
+    command_topic: str
+    enabled_by_default: bool
+    min: float | None = None
+    max: float | None = None
+    state_topic: str
+    step: float = 0.1
+    unit_of_measurement: str
+    unique_id: str
+
+
+class HASwitchDiscoveryData(pydantic.BaseModel):
+    entity_type: ClassVar[Final] = "switch"
+
+    device: HADevice
+    name: str
+    command_topic: str
+    enabled_by_default: bool
+    state_topic: str
+    unique_id: str
+
+
+HADiscoveryData = HANumberDiscoveryData | HASensorDiscoveryData | HASwitchDiscoveryData
 
 
 class ModbusConnectionConfigBase(pydantic.BaseModel, abc.ABC):
@@ -303,11 +371,17 @@ class SunSpecInverter:
             # Pick the first inverter model that exists
             # 101, 102 and 103 contain integer data + scale factor (preferred)
             # 111, 112 and 113 contain floating point data
-            # Some inverters have both, so we explicitly only use the first
-            # one we find.
+            # Some inverters have both integer and floating point models,
+            # with the same data, so explicitly only use the first one found.
             if model_id in self.device.models:
                 self.model_id: int = model_id
                 break
+
+        if 123 in self.device.models:
+            # This inverter has "immediate controls"
+            self.control_model_id: int | None = 123
+        else:
+            self.control_model_id = None
 
     def connect(self) -> None:
         self.device.connect()
@@ -320,10 +394,26 @@ class SunSpecInverter:
 
     def refresh_inverter_data(self) -> InverterData:
         "Refresh the model's data."
-        model = self.device.models[self.model_id][0]
-        model.read()
+        inverter_model = self.device.models[self.model_id][0]
+        inverter_model.read()
 
-        return InverterData.from_sunspec_model(model)
+        if self.control_model_id:
+            control_model = self.device.models[self.control_model_id][0]
+            control_model.read()
+        else:
+            control_model = None
+
+        return InverterData.from_sunspec_model(inverter_model)
+
+    def refresh_inverter_control_data(self) -> InverterControlData | None:
+        "Refresh the 'inverter control' model data."
+        if not self.control_model_id:
+            return
+
+        control_model = self.device.models[self.control_model_id][0]
+        control_model.read()
+
+        return InverterControlData.from_sunspec_model(control_model)
 
     def _ha_device_meta(self) -> HADevice:
         return HADevice(
@@ -334,7 +424,11 @@ class SunSpecInverter:
             name=f"Inverter {self.serial}",
         )
 
-    def ha_discovery_data(self, state_topic: str) -> dict[str, HADiscoveryData]:
+    def ha_discovery_data(
+        self,
+        state_topic: str,
+        control_topic_base: str,
+    ) -> dict[str, HADiscoveryData]:
         data: dict[str, HADiscoveryData] = {}
         device_meta = self._ha_device_meta()
 
@@ -342,7 +436,7 @@ class SunSpecInverter:
             extra = field_model.json_schema_extra
             assert isinstance(extra, dict)
 
-            data[field] = HADiscoveryData(
+            data[field] = HASensorDiscoveryData(
                 device=device_meta,
                 device_class=cast(str, extra["device_class"]),
                 enabled_by_default=cast(bool, extra.get("enabled_by_default", False)),
@@ -354,6 +448,42 @@ class SunSpecInverter:
                 unique_id=f"pv2mqtt_{self.serial}_{field}",
                 value_template=cast(str, extra.get("value_template", "")),
             )
+
+        for field, field_model in InverterControlData.model_fields.items():
+            extra = field_model.json_schema_extra
+            assert isinstance(extra, dict)
+
+            match extra["type"]:
+                case "switch":
+                    data[field] = HASwitchDiscoveryData(
+                        device=device_meta,
+                        name=field_model.title or "",
+                        command_topic=f"{control_topic_base}/{field}",
+                        enabled_by_default=cast(
+                            bool, extra.get("enabled_by_default", False)
+                        ),
+                        state_topic=f"{control_topic_base}/{field}",
+                        unique_id=f"pv2mqtt_{self.serial}_control_{field}",
+                    )
+                case "number":
+                    data[field] = HANumberDiscoveryData(
+                        device=device_meta,
+                        name=field_model.title or "",
+                        command_topic=f"{control_topic_base}/{field}",
+                        enabled_by_default=cast(
+                            bool, extra.get("enabled_by_default", False)
+                        ),
+                        state_topic=f"{control_topic_base}/{field}",
+                        unique_id=f"pv2mqtt_{self.serial}_control_{field}",
+                        unit_of_measurement=cast(
+                            str, extra.get("unit_of_measurement", "")
+                        ),
+                        min=cast(float, extra.get("min", 0)),
+                        max=cast(float, extra.get("max", 1)),
+                        # TODO: "step" value
+                    )
+                case _:
+                    raise ValueError(f"Unknown type in control model: {extra['type']}")
 
         return data
 
@@ -386,6 +516,10 @@ class MQTT:
         topic_base = self.config.topic_base
         return f"{topic_base}/inverter/{serial}"
 
+    def _control_topic_base(self, serial: str) -> str:
+        topic_base = self.config.topic_base
+        return f"{topic_base}/inverter/{serial}/control"
+
     def publish_data(self, serial: str, data: str) -> None:
         "Publish inverter data to MQTT"
 
@@ -393,22 +527,43 @@ class MQTT:
         rv = self.mqtt.publish(mqtt_topic, data, qos=2)
         rv.wait_for_publish()
 
+    def publish_control(
+        self,
+        serial: str,
+        inverter_control_data: InverterControlData,
+    ) -> None:
+        control_topic_base = self._control_topic_base(serial)
+
+        for field, _ in InverterControlData.model_fields.items():
+            state_topic = f"{control_topic_base}/{field}"
+            data = getattr(inverter_control_data, field)
+
+            if isinstance(data, bool):
+                data = "ON" if data else "OFF"
+
+            rv = self.mqtt.publish(state_topic, payload=str(data), qos=2)
+            rv.wait_for_publish()
+
     def publish_discovery(
         self,
         inverter: SunSpecInverter,
     ) -> None:
         discovery_base = self.config.discovery_base
 
-        discovery_data = inverter.ha_discovery_data(self._data_topic(inverter.serial))
+        discovery_data = inverter.ha_discovery_data(
+            state_topic=self._data_topic(inverter.serial),
+            control_topic_base=self._control_topic_base(inverter.serial),
+        )
 
         for field, data in discovery_data.items():
             discovery_topic = (
-                f"{discovery_base}/sensor/{inverter.serial}/{field}/config"
+                f"{discovery_base}/{data.entity_type}/{inverter.serial}/{field}/config"
             )
-            rv = self.mqtt.publish(
+            logger.debug(f"Publishing discovery metadata to {discovery_topic}")
+
+            self.mqtt.publish(
                 discovery_topic, data.model_dump_json(), qos=2, retain=True
-            )
-            rv.wait_for_publish()
+            ).wait_for_publish()
 
 
 def load_config(config_file: str) -> Settings:
@@ -440,9 +595,14 @@ def run_polling_loop(
                     device.connect()
 
                 inverter_data = device.refresh_inverter_data()
+                inverter_control_data = device.refresh_inverter_control_data()
 
                 result_queue.put(
-                    Result(serial=device.serial, inverter_data=inverter_data)
+                    Result(
+                        serial=device.serial,
+                        inverter_data=inverter_data,
+                        inverter_control_data=inverter_control_data,
+                    )
                 )
 
                 if not reuse_connection:
@@ -499,6 +659,7 @@ def main(config: Settings):
     while queue_item := result_queue.get():
         logger.info(f"Publishing data for {queue_item.serial} to MQTT")
         mqtt.publish_data(queue_item.serial, queue_item.inverter_data.model_dump_json())
+        mqtt.publish_control(queue_item.serial, queue_item.inverter_control_data)
 
         result_queue.task_done()
 
