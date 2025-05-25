@@ -3,6 +3,10 @@ import dataclasses
 import ipaddress
 import logging
 import paho.mqtt.client as mqtt_client
+import paho.mqtt.enums
+import paho.mqtt.properties
+import paho.mqtt.reasoncodes
+import paho.mqtt.subscribeoptions
 import pydantic
 import queue
 import sunspec2.modbus.client as sunspec_client
@@ -11,7 +15,7 @@ import sys
 import threading
 import time
 import yaml
-from typing import ClassVar, Final, Literal, cast, override
+from typing import Any, ClassVar, Final, Literal, cast, override
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -231,6 +235,12 @@ class Result:
     inverter_control_data: InverterControlData | None
 
 
+@dataclasses.dataclass
+class Command:
+    field: str
+    value: bytes
+
+
 class HADevice(pydantic.BaseModel):
     identifiers: list[str]
     manufacturer: str
@@ -262,6 +272,7 @@ class HANumberDiscoveryData(pydantic.BaseModel):
     enabled_by_default: bool
     min: float | None = None
     max: float | None = None
+    retain: bool = False
     state_topic: str
     step: float = 0.1
     unit_of_measurement: str
@@ -275,6 +286,7 @@ class HASwitchDiscoveryData(pydantic.BaseModel):
     name: str
     command_topic: str
     enabled_by_default: bool
+    retain: bool = False
     state_topic: str
     unique_id: str
 
@@ -312,7 +324,7 @@ class ModbusRTUDeviceConfig(ModbusConnectionConfigBase):
     type: Literal["rtu"]
     device: str
     baudrate: int = 9600
-    parity: Literal["N"] | Literal["E"] = "N"
+    parity: Literal["N", "E"] = "N"
 
     @override
     def connect(self, device_id: int) -> sunspec_client.SunSpecModbusClientDeviceRTU:
@@ -354,6 +366,11 @@ class Settings(pydantic.BaseModel):
 
 class SunSpecInverter:
     device: sunspec_client.SunSpecModbusClientDevice
+    manufacturer: str
+    model: str
+    option: str
+    version: str
+    serial: str
 
     def __init__(self, device: sunspec_client.SunSpecModbusClientDevice):
         self.device = device
@@ -386,11 +403,11 @@ class SunSpecInverter:
     def connect(self) -> None:
         self.device.connect()
 
-    def is_connected(self) -> bool:
-        return self.device.is_connected()
-
     def disconnect(self) -> None:
         self.device.disconnect()
+
+    def is_connected(self) -> bool:
+        return self.device.is_connected()
 
     def refresh_inverter_data(self) -> InverterData:
         "Refresh the model's data."
@@ -414,6 +431,15 @@ class SunSpecInverter:
         control_model.read()
 
         return InverterControlData.from_sunspec_model(control_model)
+
+    def get_control_model(self) -> sunspec_client.SunSpecModbusClientModel | None:
+        if not self.control_model_id:
+            return
+
+        control_model = self.device.models[self.control_model_id][0]
+        control_model.read()
+
+        return control_model
 
     def _ha_device_meta(self) -> HADevice:
         return HADevice(
@@ -458,7 +484,7 @@ class SunSpecInverter:
                     data[field] = HASwitchDiscoveryData(
                         device=device_meta,
                         name=field_model.title or "",
-                        command_topic=f"{control_topic_base}/{field}",
+                        command_topic=f"{control_topic_base}/{field}/set",
                         enabled_by_default=cast(
                             bool, extra.get("enabled_by_default", False)
                         ),
@@ -469,7 +495,7 @@ class SunSpecInverter:
                     data[field] = HANumberDiscoveryData(
                         device=device_meta,
                         name=field_model.title or "",
-                        command_topic=f"{control_topic_base}/{field}",
+                        command_topic=f"{control_topic_base}/{field}/set",
                         enabled_by_default=cast(
                             bool, extra.get("enabled_by_default", False)
                         ),
@@ -489,17 +515,58 @@ class SunSpecInverter:
 
 
 class MQTT:
-    def __init__(self, config: MQTTConfig):
+    def __init__(self, config: MQTTConfig) -> None:
         self.config = config
+        self.command_queues = {}
+
         self.mqtt: mqtt_client.Client
 
+    def register_command_queue(
+        self,
+        serial: str,
+        command_queue: queue.Queue[Command],
+    ) -> None:
+        command_topic = self._control_topic_base(serial) + "/+/set"
+
+        def send_command(
+            client: mqtt_client.Client,
+            userdata: Any,
+            message: mqtt_client.MQTTMessage,
+        ) -> None:
+            topic_parts = message.topic.split("/")
+            field = topic_parts[-2]
+
+            command = Command(field=field, value=message.payload)
+            command_queue.put(command)
+
+        logger.debug(f"Adding callback for {command_topic}")
+        self.mqtt.message_callback_add(sub=command_topic, callback=send_command)
+        _ = self.mqtt.subscribe(
+            topic=command_topic,
+            options=paho.mqtt.subscribeoptions.SubscribeOptions(
+                noLocal=True,
+                qos=1,
+            ),
+        )
+
     @staticmethod
-    def on_mqtt_disconnect(client, userdata, rc):
+    def on_mqtt_disconnect(
+        client: mqtt_client.Client,
+        userdata: Any,
+        disconnect_flags: mqtt_client.DisconnectFlags,
+        rc: paho.mqtt.reasoncodes.ReasonCode,
+        properties: paho.mqtt.properties.Properties | None,
+    ) -> None:
         if rc != 0:
             logger.warning("MQTT got disconnected. Will automatically reconnect.")
 
     def connect(self) -> None:
-        mqtt = mqtt_client.Client()
+        mqtt = mqtt_client.Client(
+            callback_api_version=paho.mqtt.enums.CallbackAPIVersion.VERSION2,
+            userdata=None,
+            transport="tcp",
+            clean_session=True,
+        )
         mqtt.enable_logger(logger)
 
         mqtt.on_disconnect = self.on_mqtt_disconnect
@@ -507,8 +574,8 @@ class MQTT:
         if self.config.username:
             mqtt.username_pw_set(self.config.username, self.config.password)
 
-        mqtt.connect(self.config.host, self.config.port)
-        mqtt.loop_start()
+        _ = mqtt.connect(self.config.host, self.config.port)
+        _ = mqtt.loop_start()
 
         self.mqtt = mqtt
 
@@ -533,6 +600,7 @@ class MQTT:
         inverter_control_data: InverterControlData,
     ) -> None:
         control_topic_base = self._control_topic_base(serial)
+        logger.info(f"Publishing  control data {control_topic_base}")
 
         for field, _ in InverterControlData.model_fields.items():
             state_topic = f"{control_topic_base}/{field}"
@@ -579,6 +647,7 @@ def run_polling_loop(
     device: SunSpecInverter,
     poll_interval_seconds: int,
     reuse_connection: bool,
+    refresh_event: threading.Event,
 ):
     logger.info(
         f"Starting polling loop: {device.serial} every {poll_interval_seconds}s"
@@ -589,8 +658,8 @@ def run_polling_loop(
             f"Refreshing data for {device.manufacturer} {device.model} {device.serial}"
         )
 
-        try:
-            with lock:
+        with lock:
+            try:
                 if not device.is_connected():
                     device.connect()
 
@@ -608,18 +677,84 @@ def run_polling_loop(
                 if not reuse_connection:
                     device.disconnect()
 
-        except (ConnectionError, sunspec_modbus.ModbusClientError) as exc:
-            device.disconnect()
-            logger.warning(f"Error retrieving inverter data: {exc}")
+            except (ConnectionError, sunspec_modbus.ModbusClientError) as exc:
+                device.disconnect()
+                logger.warning(f"Error retrieving inverter data: {exc}")
 
-        time.sleep(poll_interval_seconds)
+        if refresh_event.wait(poll_interval_seconds):
+            refresh_event.clear()
+
+
+def _parse_command_value(field_name: str, raw_value: bytes) -> float | int:
+    field_definition = InverterControlData.model_fields[field_name].json_schema_extra
+    assert isinstance(field_definition, dict)
+
+    match field_definition["type"]:
+        case "number":
+            return float(raw_value)
+        case "switch":
+            if raw_value == b"ON":
+                return 1
+            elif raw_value == b"OFF":
+                return 0
+            else:
+                raise ValueError("Invalid switch value (ON or OFF allowed)")
+        case _:
+            raise TypeError(f"Unknown type {field_definition['type']}")
+
+
+def run_command_loop(
+    lock: threading.Lock,
+    command_queue: queue.Queue[Command],
+    device: SunSpecInverter,
+    reuse_connection: bool,
+    refresh_event: threading.Event,
+):
+    logger.info(f"Starting command loop: {device.serial}")
+
+    while command := command_queue.get():
+        logger.info(f"Command for {device.serial}: {command.field}={command.value}")
+
+        with lock:
+            try:
+                if not device.is_connected():
+                    device.connect()
+
+                control_model = device.get_control_model()
+                if not control_model:
+                    logger.info(
+                        f"Inverter {device.serial} received a command, but inverter controls are not available?"
+                    )
+                    continue
+
+                try:
+                    parsed_value = _parse_command_value(
+                        field_name=command.field, raw_value=command.value
+                    )
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Invalid command value: {e}")
+                    continue
+
+                getattr(control_model, command.field).cvalue = parsed_value
+                control_model.write()
+
+                logger.info(f"Set attribute: {command.field}={parsed_value}")
+
+                # Trigger the refresh thread to reload inverter data:
+                refresh_event.set()
+
+                if not reuse_connection:
+                    device.disconnect()
+            except (ConnectionError, sunspec_modbus.ModbusClientError) as exc:
+                device.disconnect()
+                logger.warning(f"Error sending command: {exc}")
 
 
 def main(config: Settings):
+    result_queue: queue.Queue[Result] = queue.Queue()
+
     mqtt = MQTT(config.mqtt_config)
     mqtt.connect()
-
-    result_queue: queue.Queue[Result] = queue.Queue()
 
     devices_by_connection: dict[str, list[DeviceConfig]] = {}
     for device_cfg in config.devices:
@@ -628,7 +763,8 @@ def main(config: Settings):
         else:
             devices_by_connection[device_cfg.connection] = [device_cfg]
 
-    polling_threads: list[threading.Thread] = []
+    device_threads: list[threading.Thread] = []
+
     for connection_name, connection_cfg in config.connections.items():
         # Shared lock for all devices that use the same connection
         # This prevents concurrent access.
@@ -637,6 +773,14 @@ def main(config: Settings):
         for device_cfg in devices_by_connection[connection_name]:
             device = connection_cfg.connect(device_id=device_cfg.device_id)
             inverter = SunSpecInverter(device=device)
+
+            command_queue: queue.Queue[Command] = queue.Queue()
+            refresh_event = threading.Event()
+
+            mqtt.register_command_queue(
+                serial=inverter.serial,
+                command_queue=command_queue,
+            )
 
             mqtt.publish_discovery(inverter)
 
@@ -649,11 +793,25 @@ def main(config: Settings):
                     "device": inverter,
                     "poll_interval_seconds": device_cfg.poll_interval_seconds,
                     "reuse_connection": connection_cfg.reuse_connection,
+                    "refresh_event": refresh_event,
                 },
             )
-            polling_threads.append(polling_thread)
+            device_threads.append(polling_thread)
 
-    for t in polling_threads:
+            command_thread = threading.Thread(
+                target=run_command_loop,
+                daemon=True,
+                kwargs={
+                    "lock": lock,
+                    "command_queue": command_queue,
+                    "device": inverter,
+                    "reuse_connection": connection_cfg.reuse_connection,
+                    "refresh_event": refresh_event,
+                },
+            )
+            device_threads.append(command_thread)
+
+    for t in device_threads:
         t.start()
 
     while queue_item := result_queue.get():
