@@ -1,16 +1,31 @@
-FROM python:3.12-slim-bookworm AS build
+FROM ghcr.io/astral-sh/uv:bookworm-slim AS builder
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
+ENV UV_PYTHON_INSTALL_DIR=/python
+ENV UV_PYTHON_PREFERENCE=only-managed
 
-COPY . /src
+RUN uv python install 3.13
 
-RUN python3 -m venv /app/venv && PATH=/app/venv/bin:$PATH pip install /src
+WORKDIR /app
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv sync --locked --no-install-project --no-editable
 
-FROM python:3.12-slim-bookworm AS final
+COPY . /app
 
-COPY --from=build /app/venv /app/venv/
-COPY pv2mqtt.py /app/pv2mqtt.py
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-dev
 
-ENV PYTHONUNBUFFERED=1
-ENV PATH="/app/venv/bin:${PATH}"
+# Final image:
+FROM debian:bookworm-slim
 
-ENTRYPOINT [ "python3", "/app/pv2mqtt.py" ]
-CMD [ "/pv2mqtt.yml" ]
+# Copy the Python version
+COPY --from=builder /python /python
+
+# Copy the application from the builder
+COPY --from=builder /app /app
+
+# Place executables in the environment at the front of the path
+ENV PATH="/app/.venv/bin:$PATH"
+
+CMD [ "python3", "pv2mqtt.py", "/pv2mqtt.yml" ]
