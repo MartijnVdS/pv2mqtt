@@ -28,4 +28,4 @@ COPY --from=builder /app /app
 # Place executables in the environment at the front of the path
 ENV PATH="/app/.venv/bin:$PATH"
 
-CMD [ "python3", "pv2mqtt.py", "/pv2mqtt.yml" ]
+CMD [ "python3", "/app/pv2mqtt.py", "/pv2mqtt.yml" ]
