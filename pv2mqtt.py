@@ -3,6 +3,7 @@ import dataclasses
 import ipaddress
 import logging
 import paho.mqtt.client as mqtt_client
+import paho.mqtt.enums as mqtt_enums
 import pydantic
 import queue
 import sunspec2.modbus.client as sunspec_client
@@ -364,12 +365,15 @@ class MQTT:
         self.mqtt: mqtt_client.Client
 
     @staticmethod
-    def on_mqtt_disconnect(client, userdata, rc):
-        if rc != 0:
+    def on_mqtt_disconnect(client, userdata, flags, reason_code, properties):
+        if reason_code != 0:
             logger.warning("MQTT got disconnected. Will automatically reconnect.")
 
     def connect(self) -> None:
-        mqtt = mqtt_client.Client()
+        mqtt = mqtt_client.Client(
+            callback_api_version=mqtt_enums.CallbackAPIVersion.VERSION2,
+            reconnect_on_failure=True,
+        )
         mqtt.enable_logger(logger)
 
         mqtt.on_disconnect = self.on_mqtt_disconnect
@@ -413,7 +417,7 @@ class MQTT:
 
 def load_config(config_file: str) -> Settings:
     with open(config_file, "rb") as cfg:
-        raw_config = yaml.load(cfg, yaml.Loader)
+        raw_config = yaml.safe_load(cfg)
 
     return Settings.model_validate(raw_config)
 
@@ -476,6 +480,9 @@ def main(config: Settings):
 
         for device_cfg in devices_by_connection[connection_name]:
             device = connection_cfg.connect(device_id=device_cfg.device_id)
+
+            # Locking is not needed: at this point, the polling threads have
+            # not yet been started, so the connection is not yet "shared"
             inverter = SunSpecInverter(device=device)
 
             mqtt.publish_discovery(inverter)
