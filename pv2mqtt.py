@@ -446,20 +446,20 @@ def run_polling_loop(
     exit_event: threading.Event,
 ):
     device = None
+
     while not exit_event.is_set():
-        if device is None:
-            device = initializer()
+        with lock:
+            try:
+                if device is None:
+                    device = initializer()
+                    logger.info(
+                        f"Starting polling loop: {device.serial} every {poll_interval_seconds}s"
+                    )
 
-        logger.info(
-            f"Starting polling loop: {device.serial} every {poll_interval_seconds}s"
-        )
+                logger.info(
+                    f"Refreshing data for {device.manufacturer} {device.model} {device.serial}"
+                )
 
-        logger.info(
-            f"Refreshing data for {device.manufacturer} {device.model} {device.serial}"
-        )
-
-        try:
-            with lock:
                 if not device.is_connected():
                     device.connect()
 
@@ -472,10 +472,11 @@ def run_polling_loop(
                 if not reuse_connection:
                     device.disconnect()
 
-        except (ConnectionError, sunspec_modbus.ModbusClientError) as exc:
-            device.disconnect()
-            device = None
-            logger.warning(f"Error retrieving inverter data: {exc}")
+            except (ConnectionError, sunspec_modbus.ModbusClientError) as exc:
+                if device:
+                    device.disconnect()
+                device = None
+                logger.warning(f"Error retrieving inverter data: {exc}")
 
         exit_event.wait(poll_interval_seconds)
 
@@ -514,7 +515,7 @@ def main(config: Settings):
                 kwargs={
                     "lock": lock,
                     "result_queue": result_queue,
-                    "initializer": lambda: initialize_inverter(device, mqtt),
+                    "initializer": lambda d=device: initialize_inverter(d, mqtt),
                     "poll_interval_seconds": device_cfg.poll_interval_seconds,
                     "reuse_connection": connection_cfg.reuse_connection,
                     "exit_event": exit_event,
