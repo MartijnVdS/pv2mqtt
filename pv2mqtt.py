@@ -6,16 +6,19 @@ import paho.mqtt.client as mqtt_client
 import paho.mqtt.enums as mqtt_enums
 import pydantic
 import queue
+import signal
 import sunspec2.modbus.client as sunspec_client
 import sunspec2.modbus.modbus as sunspec_modbus
 import sys
 import threading
 import time
 import yaml
-from typing import Literal, cast, override
+from typing import Final, Literal, cast, override
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 logger = logging.getLogger(__name__)
+
+SUPPORTED_SUNSPEC_MODELS: Final = [101, 102, 103, 111, 112, 113]
 
 
 class InverterData(pydantic.BaseModel):
@@ -300,7 +303,7 @@ class SunSpecInverter:
         self.version = common_model.Vr.value
         self.serial = common_model.SN.value
 
-        for model_id in [101, 102, 103, 111, 112, 113]:
+        for model_id in SUPPORTED_SUNSPEC_MODELS:
             # Pick the first inverter model that exists
             # 101, 102 and 103 contain integer data + scale factor (preferred)
             # 111, 112 and 113 contain floating point data
@@ -428,12 +431,13 @@ def run_polling_loop(
     device: SunSpecInverter,
     poll_interval_seconds: int,
     reuse_connection: bool,
+    exit_event: threading.Event,
 ):
     logger.info(
         f"Starting polling loop: {device.serial} every {poll_interval_seconds}s"
     )
 
-    while True:
+    while not exit_event.is_set():
         logger.info(
             f"Refreshing data for {device.manufacturer} {device.model} {device.serial}"
         )
@@ -456,14 +460,20 @@ def run_polling_loop(
             device.disconnect()
             logger.warning(f"Error retrieving inverter data: {exc}")
 
-        time.sleep(poll_interval_seconds)
+        exit_event.wait(poll_interval_seconds)
 
 
 def main(config: Settings):
     mqtt = MQTT(config.mqtt_config)
     mqtt.connect()
 
-    result_queue: queue.Queue[Result] = queue.Queue()
+    result_queue: queue.Queue[Result | None] = queue.Queue()
+
+    def sigterm_handler(signum, frame):
+        result_queue.put(None)
+
+    signal.signal(signal.SIGINT, sigterm_handler)
+    signal.signal(signal.SIGTERM, sigterm_handler)
 
     devices_by_connection: dict[str, list[DeviceConfig]] = {}
     for device_cfg in config.devices:
@@ -473,6 +483,7 @@ def main(config: Settings):
             devices_by_connection[device_cfg.connection] = [device_cfg]
 
     polling_threads: list[threading.Thread] = []
+    exit_event = threading.Event()
     for connection_name, connection_cfg in config.connections.items():
         # Shared lock for all devices that use the same connection
         # This prevents concurrent access.
@@ -489,13 +500,13 @@ def main(config: Settings):
 
             polling_thread = threading.Thread(
                 target=run_polling_loop,
-                daemon=True,
                 kwargs={
                     "lock": lock,
                     "result_queue": result_queue,
                     "device": inverter,
                     "poll_interval_seconds": device_cfg.poll_interval_seconds,
                     "reuse_connection": connection_cfg.reuse_connection,
+                    "exit_event": exit_event,
                 },
             )
             polling_threads.append(polling_thread)
@@ -508,6 +519,13 @@ def main(config: Settings):
         mqtt.publish_data(queue_item.serial, queue_item.inverter_data.model_dump_json())
 
         result_queue.task_done()
+
+    # Signal worker threads it's time to stop:
+    exit_event.set()
+
+    # And clean up after them:
+    for t in polling_threads:
+        t.join()
 
 
 if __name__ == "__main__":
