@@ -13,7 +13,7 @@ import sys
 import threading
 import time
 import yaml
-from typing import Final, Literal, cast, override
+from typing import Callable, Final, Literal, cast, override
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -364,6 +364,7 @@ class SunSpecInverter:
 
 class MQTT:
     def __init__(self, config: MQTTConfig):
+        self.lock = threading.Lock()
         self.config = config
         self.mqtt: mqtt_client.Client
 
@@ -397,8 +398,10 @@ class MQTT:
         "Publish inverter data to MQTT"
 
         mqtt_topic = self._data_topic(serial)
-        rv = self.mqtt.publish(mqtt_topic, data, qos=2)
-        rv.wait_for_publish()
+
+        with self.lock:
+            rv = self.mqtt.publish(mqtt_topic, data, qos=2)
+            rv.wait_for_publish()
 
     def publish_discovery(
         self,
@@ -412,10 +415,11 @@ class MQTT:
             discovery_topic = (
                 f"{discovery_base}/sensor/{inverter.serial}/{field}/config"
             )
-            rv = self.mqtt.publish(
-                discovery_topic, data.model_dump_json(), qos=2, retain=True
-            )
-            rv.wait_for_publish()
+            with self.lock:
+                rv = self.mqtt.publish(
+                    discovery_topic, data.model_dump_json(), qos=2, retain=True
+                )
+                rv.wait_for_publish()
 
 
 def load_config(config_file: str) -> Settings:
@@ -425,19 +429,31 @@ def load_config(config_file: str) -> Settings:
     return Settings.model_validate(raw_config)
 
 
+def initialize_inverter(
+    device: sunspec_client.SunSpecModbusClientDevice, mqtt: MQTT
+) -> SunSpecInverter:
+    inverter = SunSpecInverter(device=device)
+    mqtt.publish_discovery(inverter)
+    return inverter
+
+
 def run_polling_loop(
     lock: threading.Lock,
     result_queue: queue.Queue[Result],
-    device: SunSpecInverter,
+    initializer: Callable[[], SunSpecInverter],
     poll_interval_seconds: int,
     reuse_connection: bool,
     exit_event: threading.Event,
 ):
-    logger.info(
-        f"Starting polling loop: {device.serial} every {poll_interval_seconds}s"
-    )
-
+    device = None
     while not exit_event.is_set():
+        if device is None:
+            device = initializer()
+
+        logger.info(
+            f"Starting polling loop: {device.serial} every {poll_interval_seconds}s"
+        )
+
         logger.info(
             f"Refreshing data for {device.manufacturer} {device.model} {device.serial}"
         )
@@ -458,6 +474,7 @@ def run_polling_loop(
 
         except (ConnectionError, sunspec_modbus.ModbusClientError) as exc:
             device.disconnect()
+            device = None
             logger.warning(f"Error retrieving inverter data: {exc}")
 
         exit_event.wait(poll_interval_seconds)
@@ -492,18 +509,12 @@ def main(config: Settings):
         for device_cfg in devices_by_connection[connection_name]:
             device = connection_cfg.connect(device_id=device_cfg.device_id)
 
-            # Locking is not needed: at this point, the polling threads have
-            # not yet been started, so the connection is not yet "shared"
-            inverter = SunSpecInverter(device=device)
-
-            mqtt.publish_discovery(inverter)
-
             polling_thread = threading.Thread(
                 target=run_polling_loop,
                 kwargs={
                     "lock": lock,
                     "result_queue": result_queue,
-                    "device": inverter,
+                    "initializer": lambda: initialize_inverter(device, mqtt),
                     "poll_interval_seconds": device_cfg.poll_interval_seconds,
                     "reuse_connection": connection_cfg.reuse_connection,
                     "exit_event": exit_event,
