@@ -7,10 +7,7 @@ import paho.mqtt.enums as mqtt_enums
 import pydantic
 import queue
 import signal
-import struct
-import sunspec2.device as sunspec_device
 import sunspec2.modbus.client as sunspec_client
-import sunspec2.modbus.modbus as sunspec_modbus
 import sys
 import threading
 import yaml
@@ -477,19 +474,11 @@ def run_polling_loop(
                 if not reuse_connection:
                     device.disconnect()
 
-            except (
-                OSError,
-                pydantic.ValidationError,
-                struct.error,
-                sunspec_device.ModelError,
-                sunspec_modbus.ModbusClientError,
-                sunspec_client.SunSpecModbusClientError,
-                sunspec_client.SunSpecModbusValueError,
-            ) as exc:
+            except Exception as exc:
                 if device:
                     device.disconnect()
                 device = None
-                logger.warning(f"Error retrieving inverter data: {exc}")
+                logger.warning(f"Error while retrieving inverter data: {exc}")
 
         exit_event.wait(poll_interval_seconds)
 
