@@ -7,11 +7,12 @@ import paho.mqtt.enums as mqtt_enums
 import pydantic
 import queue
 import signal
+import struct
+import sunspec2.device as sunspec_device
 import sunspec2.modbus.client as sunspec_client
 import sunspec2.modbus.modbus as sunspec_modbus
 import sys
 import threading
-import time
 import yaml
 from typing import Callable, Final, Literal, cast, override
 
@@ -187,7 +188,11 @@ class InverterData(pydantic.BaseModel):
     @classmethod
     def from_sunspec_model(cls, model: sunspec_client.SunSpecModbusClientModel):
         return cls.model_validate(
-            {field: getattr(model, field).cvalue for field in cls.model_fields.keys()}
+            {
+                field: getattr(model, field).cvalue
+                for field in cls.model_fields.keys()
+                if hasattr(model, field)
+            }
         )
 
 
@@ -472,7 +477,15 @@ def run_polling_loop(
                 if not reuse_connection:
                     device.disconnect()
 
-            except (ConnectionError, sunspec_modbus.ModbusClientError) as exc:
+            except (
+                OSError,
+                pydantic.ValidationError,
+                struct.error,
+                sunspec_device.ModelError,
+                sunspec_modbus.ModbusClientError,
+                sunspec_client.SunSpecModbusClientError,
+                sunspec_client.SunSpecModbusValueError,
+            ) as exc:
                 if device:
                     device.disconnect()
                 device = None
