@@ -10,6 +10,7 @@ import signal
 import sunspec2.modbus.client as sunspec_client
 import sys
 import threading
+import time
 import yaml
 from typing import Callable, Final, Literal, cast, override
 
@@ -530,9 +531,17 @@ def main(config: Settings):
 
     while queue_item := result_queue.get():
         logger.info(f"Publishing data for {queue_item.serial} to MQTT")
-        mqtt.publish_data(queue_item.serial, queue_item.inverter_data.model_dump_json())
 
-        result_queue.task_done()
+        try:
+            mqtt.publish_data(
+                queue_item.serial, queue_item.inverter_data.model_dump_json()
+            )
+        except Exception as exc:
+            logger.warning(f"Error publishing to MQTT: {exc}")
+            # Sleep so things have some time to recover
+            time.sleep(1)
+        finally:
+            result_queue.task_done()
 
     # Signal worker threads it's time to stop:
     exit_event.set()
