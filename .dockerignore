@@ -1,0 +1,7 @@
+target/
+.git/
+.gitignore
+Dockerfile
+docker-compose.yml
+mosquitto.conf
+pv2mqtt.docker.toml
