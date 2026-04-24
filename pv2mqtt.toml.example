@@ -1,0 +1,54 @@
+# pv2mqtt Configuration File
+
+# MQTT broker settings
+[mqtt]
+# The URL of the MQTT broker. 
+# Supports mqtt:// (unencrypted), mqtts:// or ssl:// (TLS encrypted).
+url = "mqtt://localhost:1883"
+
+# Unique identifier for this MQTT client.
+client_id = "pv2mqtt"
+
+# Prefix for all inverter data topics. 
+# Inverter data is published to: {topic_prefix}/inverter/{serial_number}
+# Inverter status is published to: {topic_prefix}/inverter/{serial_number}/status
+topic_prefix = "pv2mqtt"
+
+# Prefix for HomeAssistant MQTT discovery topics.
+# Change this if your HomeAssistant instance uses a non-default discovery prefix.
+ha_prefix = "homeassistant"
+
+# Modbus connection definitions
+[[connections]]
+# Human-readable name for this connection (used in logs).
+name = "inverter1"
+
+# Optional: Interval in seconds for keep-alive pings to keep the connection active.
+# Useful for devices that timeout quickly. Default is 30 seconds if not specified.
+# keep_alive_interval = 30
+
+[connections.modbus]
+# Modbus transport type: "tcp" or "rtu"
+type = "tcp"
+
+# TCP connection settings:
+# address = "hostname:port" or "ip:port"
+address = "192.0.2.10:502"
+
+# Optional: Enable TLS for Modbus Security (usually port 802).
+# tls = true 
+
+# RTU (Serial) connection settings example:
+# type = "rtu"
+# device = "/dev/ttyUSB0"
+# baud_rate = 9600
+# parity = "none" # options: none, even, odd (default: none)
+
+# List of SunSpec devices on this Modbus connection
+[[connections.devices]]
+# Modbus Unit ID (Slave ID) of the device (1-247).
+# Must be unique within this specific connection.
+unit_id = 1
+
+# Polling interval in seconds for this specific device.
+interval = 30

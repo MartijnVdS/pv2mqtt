@@ -1,31 +1,41 @@
-FROM ghcr.io/astral-sh/uv:debian-slim AS builder
-ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
-ENV UV_PYTHON_INSTALL_DIR=/python
-ENV UV_PYTHON_PREFERENCE=only-managed
+# Build stage - runs natively on the builder's architecture (AMD64)
+FROM --platform=$BUILDPLATFORM rust:1-slim-trixie AS builder
 
-RUN uv python install 3.14
+WORKDIR /usr/src/pv2mqtt
+COPY . .
+
+# Argument automatically provided by Docker Buildx
+ARG TARGETPLATFORM
+
+# Install host build tools and configure multi-arch for the target
+RUN apt-get update && apt-get install -y pkg-config clang lld && \
+    if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
+        dpkg --add-architecture arm64 && \
+        apt-get update && \
+        apt-get install -y gcc-aarch64-linux-gnu libssl-dev:arm64; \
+    fi && \
+    rm -rf /var/lib/apt/lists/*
+
+# Build for the target platform
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/src/pv2mqtt/target \
+    case "$TARGETPLATFORM" in \
+        "linux/amd64") \
+            cargo build --release && \
+            cp target/release/pv2mqtt /usr/src/pv2mqtt/pv2mqtt ;; \
+        "linux/arm64") \
+            rustup target add aarch64-unknown-linux-gnu && \
+            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc && \
+            export PKG_CONFIG_ALLOW_CROSS=1 && \
+            export PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig && \
+            cargo build --release --target aarch64-unknown-linux-gnu && \
+            cp target/aarch64-unknown-linux-gnu/release/pv2mqtt /usr/src/pv2mqtt/pv2mqtt ;; \
+    esac
+
+# Runtime stage - uses the target architecture
+FROM debian:trixie-slim
 
 WORKDIR /app
-RUN --mount=type=cache,target=/root/.cache/uv \
-    --mount=type=bind,source=uv.lock,target=uv.lock \
-    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --locked --no-install-project --no-editable
+COPY --from=builder /usr/src/pv2mqtt/pv2mqtt /app/pv2mqtt
 
-COPY . /app
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-dev
-
-# Final image:
-FROM debian:stable-slim
-
-# Copy the Python version
-COPY --from=builder /python /python
-
-# Copy the application from the builder
-COPY --from=builder /app /app
-
-# Place executables in the environment at the front of the path
-ENV PATH="/app/.venv/bin:$PATH"
-
-CMD [ "python3", "/app/pv2mqtt.py", "/pv2mqtt.yml" ]
+ENTRYPOINT ["/app/pv2mqtt"]

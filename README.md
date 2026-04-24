@@ -5,76 +5,77 @@
 Publish data from SunSpec-compliant inverters to an MQTT broker, including
 Home Assistant MQTT discovery.
 
-This service allows me to have all of the data of my PV inverters together in
-once place on a local machine, instead of using a different API (and possibly
-cloud service) for each one. It also allows multiple "readers" to use the data
-without conflict.
+This service is written in **Rust** and uses asynchronous communication to
+efficiently poll multiple inverters.
 
-One `pv2mqtt` instance can poll multiple devices on multiple buses and the
-refresh interval is configurable per device.
+It allows you to have all of the data of your PV inverters together in one place
+on a local machine, instead of using a different API (and possibly cloud service)
+for each one. It also allows multiple "readers" to use the data without conflict.
+
+One `pv2mqtt` instance can poll multiple devices on multiple buses (Modbus-TCP or
+Modbus-RTU) and the refresh interval is configurable per device.
 
 ## Configuration
 
-To configure `pv2mqtt`, make a copy of `pv2mqtt.dist.yml` and edit the copy
-to match your setup.
-
-You need to define a "connection" for each physical connection (= modbus bus)
-your devices are connected to and a "device" for each device you want to read
-data from.
-
-In addition, you may need to set up a user account on your MQTT broker.
-
-## Building/installing/running
-
-The easiest way to run `pv2pqtt` is to use a container:
+To configure `pv2mqtt`, make a copy of `pv2mqtt.toml.example` to `pv2mqtt.toml`
+and edit it to match your setup.
 
 ```shell
-$ docker pull ghcr.io/martijnvds/pv2mqtt:latest
-$ # (images are available for amd64, i386, arm64 and arm/v7)
-
-$ # Or build it yourself:
-$ docker build -t pv2mqtt .
+cp pv2mqtt.toml.example pv2mqtt.toml
 ```
 
-This way, you will always have a supported Python version, and you won't clutter
-up the system with dependencies.
+The configuration file uses the [TOML](https://toml.io/) format and contains:
+* **MQTT settings**: Broker URL, topic prefixes for data and Home Assistant discovery.
+* **Connections**: One or more Modbus connections (TCP or RTU).
+* **Devices**: One or more SunSpec devices per connection, each with its own
+  Unit ID and polling interval.
 
-It's also possible to install the dependencies manually, outside of a container
-by using the included  `requirements.txt`.
+## Building and Running
 
-Once you've downloaded or built the container, you can run it:
+### Using Docker (Recommended)
 
-```shell
-$ docker run --rm \
-    --volume $(pwd)/pv2mqtt.yml:/pv2mqtt.yml:ro \
-    martijnvds/pv2mqtt:latest
-```
-
-This makes the configuration file available in the container as `/pv2mqtt.yml`.
-The container is built with to automatically start `pv2mqtt` using that
-configuration file. You can specify a different one on the command line:
+The easiest way to run `pv2mqtt` is to use a container.
 
 ```shell
-$ docker run --rm \
-    --volume $(pwd)/pv2mqtt.yml:/etc/pv2mqtt.yml:ro \
-    martijnvds/pv2mqtt:latest \
-    /etc/pv2mqtt.yml
+# Build the image
+docker build -t pv2mqtt .
+
+# Run the container, mounting your config file
+docker run --rm \
+    -v $(pwd)/pv2mqtt.toml:/app/pv2mqtt.toml:ro \
+    pv2mqtt
 ```
 
 If you use a serial (RS-485) connection, you also need to pass through the
-serial device to the container at startup. Make sure you use the same device
-name in your configuration file!
+serial device to the container:
 
 ```shell
-$ docker run --rm \
-    --volume=$(pwd)/pv2mqtt.yml:/pv2mqtt.yml:ro \
+docker run --rm \
+    -v $(pwd)/pv2mqtt.toml:/app/pv2mqtt.toml:ro \
     --device=/dev/ttyUSB0:/dev/ttyUSB0:rw \
-    ghcr.io/martijnvds/pv2mqtt:latest
+    pv2mqtt
 ```
 
-## Limitations
+### Using Cargo
 
-Currently, only inverter data is read and published.
+If you have Rust installed, you can build and run it directly:
+
+```shell
+# Build and run
+cargo run --release
+```
+
+Note: `pv2mqtt` expects `pv2mqtt.toml` to be in the current working directory.
+
+## Features
+
+- **SunSpec Support**: Supports inverters that support the Sunspec protocol, and
+  expose at least one of the following "models": 101, 102, 103, 111, 112, 113.
+- **Home Assistant Discovery**: Automatically registers inverters in Home Assistant
+  using MQTT autodiscovery.
+- **JSON over MQTT**: Publishes data to MQTT in JSON format.
+- **Security**: Supports TLS connections for MQTT and Modbus-TCP.
+- **Robust**: Handles connection drops and reconnects automatically.
 
 ## Tested devices
 
@@ -87,5 +88,6 @@ The program has been tested with the following devices:
 
 ## Links
 
-* [pysunspec2](https://github.com/sunspec/pysunspec2) - SunSpec library that does the heavy lifting.
+* [SunSpec Alliance](https://sunspec.org/) - Official SunSpec specifications.
+* [sunspec](https://github.com/bikeshedder/sunspec) - The SunSpec library used by this project.
 * [Home Assistant SunSpec integration](https://github.com/CJNE/ha-sunspec) - Alternative if all your inverters support Modbus-TCP and you only need your data in Home Assistant.

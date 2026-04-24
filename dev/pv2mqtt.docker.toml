@@ -1,0 +1,18 @@
+[mqtt]
+url = "mqtt://mosquitto:1883"
+client_id = "pv2mqtt"
+topic_prefix = "solar"
+ha_prefix = "homeassistant"
+
+
+[[connections]]
+name = "apsystems"
+
+[connections.modbus]
+type = "tcp"
+address = "192.0.2.10:502"
+# tls = true # Enable TLS for Modbus Security (usually port 802)
+
+[[connections.devices]]
+unit_id = 1
+interval = 60

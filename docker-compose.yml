@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:latest
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./dev/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+
+  pv2mqtt:
+    build: .
+    volumes:
+      - ./dev/pv2mqtt.docker.toml:/app/pv2mqtt.toml
+    depends_on:
+      - mosquitto
+    environment:
+      RUST_LOG: pv2mqtt=trace
+    restart: unless-stopped
+
+volumes:
+  mosquitto_data:
+  mosquitto_log:
