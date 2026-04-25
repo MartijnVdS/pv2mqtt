@@ -23,8 +23,9 @@ ha_prefix = "homeassistant"
 # Human-readable name for this connection (used in logs).
 name = "inverter1"
 
-# Optional: Interval in seconds for keep-alive pings to keep the connection active.
-# Useful for devices that timeout quickly. Default is 30 seconds if not specified.
+# Interval (in seconds) to send a keep-alive "ping" if there has been no activity.
+# Useful for devices that timeout quickly. Set to 0 to disable.
+# Default: 30
 # keep_alive_interval = 30
 
 [connections.modbus]

@@ -305,8 +305,8 @@ impl ConnectionTask {
 
     async fn run_polling_loop(&self, devices: &mut [DeviceState]) -> Result<()> {
         let mut last_activity = Instant::now();
-        let keep_alive_duration =
-            Duration::from_secs(self.config.keep_alive_interval.unwrap_or(30));
+        let keep_alive_interval = self.config.keep_alive_interval.unwrap_or(30);
+        let keep_alive_duration = Duration::from_secs(keep_alive_interval);
 
         loop {
             if self.token.is_cancelled() {
@@ -315,8 +315,12 @@ impl ConnectionTask {
             }
 
             let now = Instant::now();
-            // Start with next keep-alive as the upper bound
-            let mut next_wakeup = last_activity + keep_alive_duration;
+            // Start with next keep-alive as the upper bound if enabled
+            let mut next_wakeup = if keep_alive_interval > 0 {
+                last_activity + keep_alive_duration
+            } else {
+                now + Duration::from_secs(3600) // Default large sleep
+            };
 
             for device_state in devices.iter() {
                 let interval = Duration::from_secs(device_state.config.interval);
@@ -346,7 +350,7 @@ impl ConnectionTask {
             let now = Instant::now();
 
             // Check if we need to send a keep-alive "ping"
-            if now.duration_since(last_activity) >= keep_alive_duration {
+            if keep_alive_interval > 0 && now.duration_since(last_activity) >= keep_alive_duration {
                 // Try to ping the first device that we've successfully discovered
                 if let Some(state) = devices.iter().find(|d| d.device.is_some()) {
                     let ping_span = info_span!("keep_alive", unit_id = state.config.unit_id);
