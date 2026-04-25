@@ -28,3 +28,6 @@ url = "2.5.8"
 [profile.release]
 lto = true
 codegen-units = 1
+
+[patch.crates-io]
+tokio-modbus = { git = "https://github.com/rlarsson-mc/tokio-modbus", branch = "fix/discard-invalid-transaction-id" }
