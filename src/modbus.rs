@@ -167,7 +167,7 @@ impl ConnectionTask {
 
                     // Try to read Model 1 for metadata/serial
                     match tokio::time::timeout(
-                        Duration::from_secs(5),
+                        Duration::from_secs(10),
                         device.read_model::<Model1>(),
                     )
                     .instrument(info_span!(
@@ -419,7 +419,7 @@ impl ConnectionTask {
             &device_state.device,
         ) {
             let poll_result =
-                tokio::time::timeout(Duration::from_secs(5), self.poll_device(device, model_id))
+                tokio::time::timeout(Duration::from_secs(10), self.poll_device(device, model_id))
                     .await;
 
             match poll_result {
