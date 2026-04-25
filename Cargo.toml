@@ -7,7 +7,14 @@ edition = "2024"
 unsafe_code = "forbid"
 
 [dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "signal"] }
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "sync",
+    "time",
+    "net",
+    "signal",
+] }
 tokio-util = "0.7"
 tokio-modbus = { version = "0.17", features = ["tcp", "rtu"] }
 tokio-serial = "5.4"
@@ -15,7 +22,16 @@ rumqttc = { version = "0.25", features = ["url", "use-rustls"] }
 tokio-rustls = "0.26"
 rustls-native-certs = "0.8"
 rustls = { version = "0.23", features = ["ring"] }
-sunspec = { version = "0.9", features = ["tokio", "model1", "model101", "model102", "model103", "model111", "model112", "model113"] }
+sunspec = { version = "0.9", features = [
+    "tokio",
+    "model1",
+    "model101",
+    "model102",
+    "model103",
+    "model111",
+    "model112",
+    "model113",
+] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "1.1"
