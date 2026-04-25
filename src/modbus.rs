@@ -663,7 +663,7 @@ impl ConnectionTask {
     }
 
     fn discovery_message(&self, serial: &str, ctx: &DiscoveryContext) -> (String, String) {
-        let topic = format!("{}/sensor/{}_{}/config", self.ha_prefix, serial, ctx.name);
+        let topic = format!("{}/sensor/{}/{}/config", self.ha_prefix, serial, ctx.name);
         let mut payload = serde_json::json!({
             "name": ctx.label,
             "state_topic": self.inverter_topic(serial),
