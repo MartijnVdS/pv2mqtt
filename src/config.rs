@@ -12,12 +12,37 @@ pub struct Config {
     pub connections: Vec<ConnectionConfig>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Deserialize, Clone)]
 pub struct MqttConfig {
     pub url: String,
     pub client_id: String,
     pub topic_prefix: String,
     pub ha_prefix: String,
+}
+
+impl MqttConfig {
+    pub fn masked_url(&self) -> String {
+        match url::Url::parse(&self.url) {
+            Ok(mut url) => {
+                if url.password().is_some() {
+                    let _ = url.set_password(Some("********"));
+                }
+                url.to_string()
+            }
+            Err(_) => self.url.clone(),
+        }
+    }
+}
+
+impl std::fmt::Debug for MqttConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MqttConfig")
+            .field("url", &self.masked_url())
+            .field("client_id", &self.client_id)
+            .field("topic_prefix", &self.topic_prefix)
+            .field("ha_prefix", &self.ha_prefix)
+            .finish()
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -172,6 +197,28 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_mqtt_url_masking() {
+        let config = MqttConfig {
+            url: "mqtt://user:password@localhost:1883".to_string(),
+            client_id: "test".to_string(),
+            topic_prefix: "pv2mqtt".to_string(),
+            ha_prefix: "homeassistant".to_string(),
+        };
+        assert_eq!(
+            config.masked_url(),
+            "mqtt://user:********@localhost:1883"
+        );
+
+        let config_no_pass = MqttConfig {
+            url: "mqtt://localhost:1883".to_string(),
+            client_id: "test".to_string(),
+            topic_prefix: "pv2mqtt".to_string(),
+            ha_prefix: "homeassistant".to_string(),
+        };
+        assert_eq!(config_no_pass.masked_url(), "mqtt://localhost:1883");
+    }
 
     #[test]
     fn test_strict_prefix_validation() {

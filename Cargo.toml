@@ -19,11 +19,11 @@ sunspec = { version = "0.9", features = ["tokio", "model1", "model101", "model10
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "1.1"
-urlencoding = "2.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1.0"
+url = "2.5.8"
 
 [profile.release]
 lto = true

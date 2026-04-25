@@ -41,24 +41,15 @@ impl MqttTask {
     }
 
     async fn run_internal(mut self) -> anyhow::Result<()> {
-        let separator = if self.config.url.contains('?') {
-            '&'
-        } else {
-            '?'
-        };
-        // Append client_id to the URL. If it already exists in the URL, this
-        // appended version takes precedence (last one wins in rumqttc).
-        let url_with_client_id = format!(
-            "{}{}client_id={}",
-            self.config.url,
-            separator,
-            urlencoding::encode(&self.config.client_id)
-        );
+        let mut url = url::Url::parse(&self.config.url)?;
+        url.query_pairs_mut()
+            .append_pair("client_id", &self.config.client_id);
 
-        let mut mqttoptions = MqttOptions::parse_url(url_with_client_id)?;
+        let mut mqttoptions = MqttOptions::parse_url(url.as_str())?;
         mqttoptions.set_keep_alive(Duration::from_secs(30));
 
-        if self.config.url.starts_with("mqtts://") || self.config.url.starts_with("ssl://") {
+        let scheme = url.scheme();
+        if scheme == "mqtts" || scheme == "ssl" {
             let client_config = rustls::ClientConfig::builder()
                 .with_root_certificates(Arc::clone(&self.root_cert_store))
                 .with_no_client_auth();
@@ -70,7 +61,7 @@ impl MqttTask {
 
         let (client, mut eventloop) = AsyncClient::new(mqttoptions, 20);
 
-        info!("MQTT task starting connection to {}", self.config.url);
+        info!("MQTT task starting connection to {}", self.config.masked_url());
 
         let eventloop_handle = tokio::spawn(
             async move {
