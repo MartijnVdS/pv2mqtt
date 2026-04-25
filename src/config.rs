@@ -53,18 +53,13 @@ pub struct ConnectionConfig {
     pub keep_alive_interval: Option<u64>,
 }
 
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Parity {
+    #[default]
     None,
     Even,
     Odd,
-}
-
-impl Default for Parity {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 #[derive(Debug, Deserialize, Clone)]

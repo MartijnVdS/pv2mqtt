@@ -71,8 +71,17 @@ async fn main() -> anyhow::Result<()> {
     let mqtt_certs = Arc::clone(&root_cert_store);
     let mqtt_handle = tokio::spawn(async move {
         let task = MqttTask::new(mqtt_config, mqtt_rx, mqtt_certs);
-        if let Err(e) = task.run().await {
-            error!("MQTT task failed: {}", e);
+        let handle = tokio::spawn(async move { task.run().await });
+        match handle.await {
+            Ok(Ok(_)) => info!("MQTT task finished cleanly"),
+            Ok(Err(e)) => error!("MQTT task failed: {}", e),
+            Err(e) => {
+                if e.is_panic() {
+                    error!("MQTT task panicked!");
+                } else {
+                    error!("MQTT task join error: {}", e);
+                }
+            }
         }
     });
 
@@ -121,7 +130,7 @@ async fn main() -> anyhow::Result<()> {
                     break;
                 }
                 tokio::select! {
-                    _ = tokio::time::sleep(tokio::time::Duration::from_secs(5)) => {}
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {}
                     _ = token.cancelled() => break,
                 }
             }
