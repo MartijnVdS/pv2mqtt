@@ -22,7 +22,7 @@ use tokio_rustls::TlsConnector;
 use tokio_rustls::rustls::{ClientConfig, pki_types::ServerName};
 use tokio_serial::SerialStream;
 use tokio_util::sync::CancellationToken;
-use tracing::{Instrument, error, info, info_span, trace, warn};
+use tracing::{Instrument, debug, error, info, info_span, trace, warn};
 
 pub struct ConnectionTask {
     config: ConnectionConfig,
@@ -356,7 +356,7 @@ impl ConnectionTask {
                     let ping_span = info_span!("keep_alive", unit_id = state.config.unit_id);
                     let device = state.device.as_ref().unwrap();
                     async {
-                        info!("Sending keep-alive");
+                        debug!("Sending keep-alive");
 
                         // Efficiently ping by reading only the first 2 registers of Model 1 (ID and Length)
                         // This is much more efficient than reading the whole Model 1.
