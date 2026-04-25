@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use anyhow::{Context, Result};
+use crate::error::{Pv2MqttError, Result};
 use serde::Deserialize;
 use std::fs;
 use std::net::SocketAddr;
@@ -93,8 +93,11 @@ fn default_polling_interval() -> u64 {
 
 impl Config {
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let content = fs::read_to_string(path).context("Failed to read config file")?;
-        let config: Config = toml::from_str(&content).context("Failed to parse config TOML")?;
+        let path_ref = path.as_ref();
+        let content = fs::read_to_string(path_ref)
+            .map_err(|e| Pv2MqttError::Config(format!("Failed to read config file {:?}: {}", path_ref, e)))?;
+        let config: Config = toml::from_str(&content)
+            .map_err(|e| Pv2MqttError::Config(format!("Failed to parse config TOML: {}", e)))?;
         config.validate()?;
         Ok(config)
     }
@@ -107,26 +110,26 @@ impl Config {
 
         for (name, value) in prefixes {
             if value.is_empty() {
-                anyhow::bail!("MQTT {} cannot be empty", name);
+                return Err(Pv2MqttError::Config(format!("MQTT {} cannot be empty", name)).into());
             }
             if value.ends_with('/') {
-                anyhow::bail!("MQTT {} '{}' cannot end with a slash", name, value);
+                return Err(Pv2MqttError::Config(format!("MQTT {} '{}' cannot end with a slash", name, value)).into());
             }
             if value.contains("//") {
-                anyhow::bail!("MQTT {} '{}' cannot contain double slashes", name, value);
+                return Err(Pv2MqttError::Config(format!("MQTT {} '{}' cannot contain double slashes", name, value)).into());
             }
         }
 
         if self.connections.is_empty() {
-            anyhow::bail!("At least one connection must be defined");
+            return Err(Pv2MqttError::Config("At least one connection must be defined".to_string()).into());
         }
 
         for conn in &self.connections {
             if conn.name.trim().is_empty() {
-                anyhow::bail!("Connection name cannot be empty or only whitespace");
+                return Err(Pv2MqttError::Config("Connection name cannot be empty or only whitespace".to_string()).into());
             }
             if conn.devices.is_empty() {
-                anyhow::bail!("Connection '{}' must have at least one device", conn.name);
+                return Err(Pv2MqttError::Config(format!("Connection '{}' must have at least one device", conn.name)).into());
             }
 
             match &conn.modbus {
@@ -135,52 +138,78 @@ impl Config {
                         // If it's not a direct SocketAddr, check if it's a valid host:port
                         let parts: Vec<&str> = address.split(':').collect();
                         if parts.len() != 2 {
-                            anyhow::bail!(
+                            return Err(Pv2MqttError::Config(format!(
                                 "Invalid TCP address '{}' in connection '{}'. Expected 'hostname:port' or 'ip:port'.",
                                 address,
                                 conn.name
-                            );
+                            )).into());
                         }
                         if parts[0].is_empty() {
-                            anyhow::bail!(
+                            return Err(Pv2MqttError::Config(format!(
                                 "Host part of address '{}' cannot be empty in connection '{}'",
                                 address,
                                 conn.name
-                            );
+                            )).into());
                         }
-                        let _: u16 = parts[1].parse().context(format!(
-                            "Invalid port in TCP address '{}' in connection '{}'",
-                            address, conn.name
-                        ))?;
+                        let _: u16 = parts[1].parse()
+                            .map_err(|e| Pv2MqttError::Config(format!(
+                                "Invalid port in TCP address '{}' in connection '{}': {}",
+                                address, conn.name, e
+                            )))?;
                     }
                 }
-                ModbusConfig::Rtu { device, .. } => {
+                ModbusConfig::Rtu {
+                    device, baud_rate, ..
+                } => {
                     if device.is_empty() {
-                        anyhow::bail!(
+                        return Err(Pv2MqttError::Config(format!(
                             "RTU device path cannot be empty in connection '{}'",
                             conn.name
-                        );
+                        ))
+                        .into());
+                    }
+                    if *baud_rate == 0 {
+                        return Err(Pv2MqttError::Config(format!(
+                            "RTU baud rate cannot be 0 in connection '{}'",
+                            conn.name
+                        ))
+                        .into());
                     }
                 }
+            }
+
+            if conn.keep_alive_interval.is_some_and(|ka| ka > 3600) {
+                let ka = conn.keep_alive_interval.unwrap();
+                return Err(Pv2MqttError::Config(format!(
+                    "Keep-alive interval {} is too large in connection '{}' (max 3600s)",
+                    ka, conn.name
+                ))
+                .into());
             }
 
             let mut unit_ids = std::collections::HashSet::new();
             for device in &conn.devices {
                 if !unit_ids.insert(device.unit_id) {
-                    anyhow::bail!(
+                    return Err(Pv2MqttError::Config(format!(
                         "Duplicate unit_id {} in connection '{}'",
-                        device.unit_id,
-                        conn.name
-                    );
+                        device.unit_id, conn.name
+                    ))
+                    .into());
                 }
-                if device.unit_id == 0 {
-                    anyhow::bail!("Device unit_id cannot be 0 in connection '{}'", conn.name);
+                if device.unit_id == 0 || device.unit_id > 247 {
+                    return Err(Pv2MqttError::Config(format!(
+                        "Device unit_id {} is out of valid Modbus range (1-247) in connection '{}'",
+                        device.unit_id, conn.name
+                    ))
+                    .into());
                 }
-                if device.interval < 1 {
-                    anyhow::bail!(
-                        "Device polling interval must be at least 1 second in connection '{}'",
+                if !(1..=3600).contains(&device.interval) {
+                    return Err(Pv2MqttError::Config(format!(
+                        "Device polling interval {} is out of reasonable range (1-3600s) in connection '{}'",
+                        device.interval,
                         conn.name
-                    );
+                    ))
+                    .into());
                 }
             }
         }
@@ -338,11 +367,88 @@ mod tests {
                 keep_alive_interval: None,
             }],
         };
-        // Currently this passes, but it should fail
-        assert!(
-            config.validate().is_err(),
-            "Duplicate unit_ids should be invalid"
-        );
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_invalid_unit_id_range() {
+        let mut config = Config {
+            mqtt: MqttConfig {
+                url: "mqtt://localhost:1883".to_string(),
+                client_id: "test".to_string(),
+                topic_prefix: "solar".to_string(),
+                ha_prefix: "homeassistant".to_string(),
+            },
+            connections: vec![ConnectionConfig {
+                name: "test".to_string(),
+                modbus: ModbusConfig::Tcp {
+                    address: "127.0.0.1:502".to_string(),
+                    tls: false,
+                },
+                devices: vec![DeviceConfig {
+                    unit_id: 248, // Out of range
+                    interval: 10,
+                }],
+                keep_alive_interval: None,
+            }],
+        };
+        assert!(config.validate().is_err());
+
+        if let Some(conn) = config.connections.get_mut(0) {
+            conn.devices[0].unit_id = 0; // Also out of range
+        }
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_invalid_interval_range() {
+        let config = Config {
+            mqtt: MqttConfig {
+                url: "mqtt://localhost:1883".to_string(),
+                client_id: "test".to_string(),
+                topic_prefix: "solar".to_string(),
+                ha_prefix: "homeassistant".to_string(),
+            },
+            connections: vec![ConnectionConfig {
+                name: "test".to_string(),
+                modbus: ModbusConfig::Tcp {
+                    address: "127.0.0.1:502".to_string(),
+                    tls: false,
+                },
+                devices: vec![DeviceConfig {
+                    unit_id: 1,
+                    interval: 4000, // Too large
+                }],
+                keep_alive_interval: None,
+            }],
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_invalid_baud_rate() {
+        let config = Config {
+            mqtt: MqttConfig {
+                url: "mqtt://localhost:1883".to_string(),
+                client_id: "test".to_string(),
+                topic_prefix: "solar".to_string(),
+                ha_prefix: "homeassistant".to_string(),
+            },
+            connections: vec![ConnectionConfig {
+                name: "test".to_string(),
+                modbus: ModbusConfig::Rtu {
+                    device: "/dev/ttyUSB0".to_string(),
+                    baud_rate: 0, // Invalid
+                    parity: Parity::None,
+                },
+                devices: vec![DeviceConfig {
+                    unit_id: 1,
+                    interval: 10,
+                }],
+                keep_alive_interval: None,
+            }],
+        };
+        assert!(config.validate().is_err());
     }
 
     #[test]

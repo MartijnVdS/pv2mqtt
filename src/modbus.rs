@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::config::{ConnectionConfig, DeviceConfig, ModbusConfig, Parity};
+use crate::error::{Pv2MqttError, Result};
 use crate::models::InverterData;
 use crate::mqtt::MqttMessage;
-use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -43,6 +43,12 @@ struct DeviceState {
     version: Option<String>,
     supported_model: Option<u16>,
     device: Option<AsyncDevice<Arc<Mutex<ModbusContext>>>>,
+}
+
+impl DeviceState {
+    fn clear_connection(&mut self) {
+        self.device = None;
+    }
 }
 
 impl ConnectionTask {
@@ -92,6 +98,12 @@ impl ConnectionTask {
         let mut first_run = true;
 
         while !self.token.is_cancelled() {
+            // Explicitly clear any old connection handles before attempting to reconnect.
+            // This ensures that the previous socket/serial port is closed.
+            for device_state in devices.iter_mut() {
+                device_state.clear_connection();
+            }
+
             if !first_run {
                 info!("Attempting to reconnect");
             }
@@ -177,6 +189,19 @@ impl ConnectionTask {
                         }
                     }
 
+                    if device_state.supported_model.is_none() {
+                        let available = available_models
+                            .iter()
+                            .map(|id| id.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        return Err(Pv2MqttError::DeviceDiscovery(
+                            device_state.config.unit_id,
+                            format!("No supported inverter model found. Available: {}", available),
+                        )
+                        .into());
+                    }
+
                     // Try to read Model 1 for metadata/serial
                     match tokio::time::timeout(
                         Duration::from_secs(10),
@@ -230,11 +255,12 @@ impl ConnectionTask {
                         }
                         Ok(Err(e)) => {
                             if device_state.serial.is_none() {
+                                let pv_err = Pv2MqttError::ModelRead(1, e.to_string());
                                 error!(
                                     "Failed to read Model 1 from device {}: {}",
-                                    device_state.config.unit_id, e
+                                    device_state.config.unit_id, pv_err
                                 );
-                                return Err(e.into());
+                                return Err(pv_err.into());
                             } else {
                                 info!(
                                     "Failed to refresh Model 1 for device, using cached info (Serial: {:?})",
@@ -243,11 +269,12 @@ impl ConnectionTask {
                             }
                         }
                         Err(_) => {
-                            error!(
+                            let pv_err = Pv2MqttError::ModbusTimeout(format!(
                                 "Timeout reading Model 1 from device {}",
                                 device_state.config.unit_id
-                            );
-                            return Err(anyhow::anyhow!("Timeout reading Model 1"));
+                            ));
+                            error!("{}", pv_err);
+                            return Err(pv_err.into());
                         }
                     }
 
@@ -255,11 +282,12 @@ impl ConnectionTask {
                     device_state.device = Some(device);
                 }
                 Err(e) => {
-                    error!(
-                        "Failed to discover device {}: {}",
-                        device_state.config.unit_id, e
+                    let pv_err = Pv2MqttError::DeviceDiscovery(
+                        device_state.config.unit_id,
+                        e.to_string(),
                     );
-                    return Err(e.into());
+                    error!("{}", pv_err);
+                    return Err(pv_err);
                 }
             }
         }
@@ -270,9 +298,13 @@ impl ConnectionTask {
         match &self.config.modbus {
             ModbusConfig::Tcp { address, tls } => {
                 info!("Connecting to Modbus TCP at {} (TLS: {})", address, tls);
-                let stream = tokio::net::TcpStream::connect(address)
-                    .await
-                    .context(format!("Failed to connect to {}", address))?;
+                let stream = tokio::time::timeout(
+                    Duration::from_secs(10),
+                    tokio::net::TcpStream::connect(address),
+                )
+                .await
+                .map_err(|_| Pv2MqttError::ModbusTcpConnection(format!("Timeout connecting to {}", address)))?
+                .map_err(|e| Pv2MqttError::ModbusTcpConnection(format!("Failed to connect to {}: {}", address, e)))?;
 
                 if *tls {
                     let config = ClientConfig::builder()
@@ -283,15 +315,23 @@ impl ConnectionTask {
                     let host = address
                         .split(':')
                         .next()
-                        .ok_or_else(|| anyhow::anyhow!("Invalid address"))?;
+                        .ok_or_else(|| Pv2MqttError::ModbusTcpConnection("Invalid address".to_string()))?;
                     let server_name = ServerName::try_from(host)
-                        .context("invalid server name")?
+                        .map_err(|e| Pv2MqttError::ModbusTcpConnection(format!("invalid server name: {}", e)))?
                         .to_owned();
 
-                    let tls_stream = connector
-                        .connect(server_name, stream)
-                        .await
-                        .context("TLS handshake failed")?;
+                    let tls_stream = tokio::time::timeout(
+                        Duration::from_secs(10),
+                        connector.connect(server_name, stream),
+                    )
+                    .await
+                    .map_err(|_| {
+                        Pv2MqttError::ModbusTcpConnection(format!(
+                            "Timeout during TLS handshake with {}",
+                            address
+                        ))
+                    })?
+                    .map_err(|e| Pv2MqttError::ModbusTcpConnection(format!("TLS handshake failed: {}", e)))?;
                     Ok(tcp::attach(tls_stream))
                 } else {
                     Ok(tcp::attach(stream))
@@ -370,7 +410,7 @@ impl ConnectionTask {
                 if let Some(state) = devices.iter().find(|d| d.device.is_some()) {
                     let ping_span = info_span!("keep_alive", unit_id = state.config.unit_id);
                     let device = state.device.as_ref().unwrap();
-                    async {
+                    let ping_res: Result<()> = async {
                         debug!("Sending keep-alive");
 
                         // Efficiently ping by reading only the first 2 registers of Model 1 (ID and Length)
@@ -382,12 +422,23 @@ impl ConnectionTask {
                             Duration::from_secs(5),
                             ctx.read_holding_registers(addr, 2),
                         )
-                        .await??;
+                        .await
+                        .map_err(|_| {
+                            Pv2MqttError::ModbusTimeout(format!(
+                                "Keep-alive timeout for unit {}",
+                                device.slave_id
+                            ))
+                        })??;
 
-                        Ok::<(), anyhow::Error>(())
+                        Ok(())
                     }
                     .instrument(ping_span)
-                    .await?;
+                    .await;
+
+                    if let Err(e) = ping_res {
+                        error!("Keep-alive failed: {}", e);
+                        return Err(e);
+                    }
                     last_activity = Instant::now();
                 }
             }
@@ -466,12 +517,13 @@ impl ConnectionTask {
                         .await?;
                 }
                 Ok(Err(e)) => {
-                    error!("Failed to poll: {}", e);
+                    let pv_err = Pv2MqttError::ModelRead(model_id, e.to_string());
+                    error!("Failed to poll: {}", pv_err);
                     // Update status with error
                     let (status_topic, status_payload) = self.status_message(
                         serial,
                         "ERROR",
-                        Some(&e.to_string()),
+                        Some(pv_err.clone()),
                         device_state.last_success_timestamp.as_ref(),
                     );
                     let _ = self
@@ -482,14 +534,15 @@ impl ConnectionTask {
                             retain: false,
                         })
                         .await;
-                    return Err(e);
+                    return Err(pv_err);
                 }
                 Err(_) => {
-                    error!("Timeout polling");
+                    let pv_err = Pv2MqttError::ModbusTimeout(format!("Timeout polling device {}", serial));
+                    error!("{}", pv_err);
                     let (status_topic, status_payload) = self.status_message(
                         serial,
                         "ERROR",
-                        Some("Timeout"),
+                        Some(pv_err.clone()),
                         device_state.last_success_timestamp.as_ref(),
                     );
                     let _ = self
@@ -500,7 +553,7 @@ impl ConnectionTask {
                             retain: false,
                         })
                         .await;
-                    return Err(anyhow::anyhow!("Timeout polling device {}", serial));
+                    return Err(pv_err);
                 }
             }
         }
@@ -517,14 +570,15 @@ impl ConnectionTask {
         &self,
         serial: &str,
         status: &str,
-        error: Option<&str>,
+        error: Option<Pv2MqttError>,
         last_success: Option<&DateTime<Utc>>,
     ) -> (String, String) {
         let topic = format!("{}/inverter/{}/status", self.topic_prefix, serial);
         let payload = serde_json::json!({
             "timestamp": last_success.map(|dt| dt.to_rfc3339()),
             "status": status,
-            "error": error
+            "error": error.as_ref().map(|e| e.to_string()),
+            "error_category": error.as_ref().map(|e| e.category()),
         })
         .to_string();
         (topic, payload)
@@ -536,13 +590,37 @@ impl ConnectionTask {
         model_id: u16,
     ) -> Result<InverterData> {
         match model_id {
-            101 => Ok(device.read_model::<Model101>().await?.into()),
-            102 => Ok(device.read_model::<Model102>().await?.into()),
-            103 => Ok(device.read_model::<Model103>().await?.into()),
-            111 => Ok(device.read_model::<Model111>().await?.into()),
-            112 => Ok(device.read_model::<Model112>().await?.into()),
-            113 => Ok(device.read_model::<Model113>().await?.into()),
-            _ => anyhow::bail!("Unsupported model {}", model_id),
+            101 => Ok(device
+                .read_model::<Model101>()
+                .await
+                .map_err(|e| Pv2MqttError::ModelRead(101, e.to_string()))?
+                .into()),
+            102 => Ok(device
+                .read_model::<Model102>()
+                .await
+                .map_err(|e| Pv2MqttError::ModelRead(102, e.to_string()))?
+                .into()),
+            103 => Ok(device
+                .read_model::<Model103>()
+                .await
+                .map_err(|e| Pv2MqttError::ModelRead(103, e.to_string()))?
+                .into()),
+            111 => Ok(device
+                .read_model::<Model111>()
+                .await
+                .map_err(|e| Pv2MqttError::ModelRead(111, e.to_string()))?
+                .into()),
+            112 => Ok(device
+                .read_model::<Model112>()
+                .await
+                .map_err(|e| Pv2MqttError::ModelRead(112, e.to_string()))?
+                .into()),
+            113 => Ok(device
+                .read_model::<Model113>()
+                .await
+                .map_err(|e| Pv2MqttError::ModelRead(113, e.to_string()))?
+                .into()),
+            _ => Err(Pv2MqttError::UnsupportedModel(model_id)),
         }
     }
 

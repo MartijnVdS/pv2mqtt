@@ -18,7 +18,7 @@ tokio = { version = "1", features = [
 tokio-util = "0.7"
 tokio-modbus = { version = "0.17", features = ["tcp", "rtu"] }
 tokio-serial = "5.4"
-rumqttc = { version = "0.25", features = ["url", "use-rustls"] }
+rumqttc-next = { version = "0.30", default-features = false, features = ["url", "use-rustls-ring"] }
 tokio-rustls = "0.26"
 rustls-native-certs = "0.8"
 rustls = { version = "0.23", features = ["ring"] }
@@ -38,8 +38,8 @@ toml = "1.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 chrono = { version = "0.4", features = ["serde"] }
-anyhow = "1.0"
 url = "2.5.8"
+thiserror = "2.0.18"
 
 [profile.release]
 lto = true

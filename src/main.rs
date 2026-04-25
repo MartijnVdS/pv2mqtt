@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 mod config;
+mod error;
 mod modbus;
 mod models;
 mod mqtt;
 
 use crate::config::Config;
+use crate::error::{Pv2MqttError, Result};
 use crate::modbus::ConnectionTask;
 use crate::mqtt::{MqttMessage, MqttTask};
-use anyhow::Context;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -16,7 +17,7 @@ use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<()> {
     // Initialize logging
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env().add_directive(tracing::Level::INFO.into()))
@@ -47,7 +48,7 @@ async fn main() -> anyhow::Result<()> {
         root_cert_store
     })
     .await
-    .context("Failed to load native certificates")?;
+    .map_err(|e| Pv2MqttError::Internal(format!("Failed to load native certificates: {}", e)))?;
 
     let root_cert_store = Arc::new(root_cert_store);
 
@@ -59,7 +60,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Err(e) => {
             error!("Failed to load configuration: {}", e);
-            anyhow::bail!("Configuration error");
+            return Err(e);
         }
     };
 
