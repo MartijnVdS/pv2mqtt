@@ -146,7 +146,13 @@ impl ConnectionTask {
         ctx: ModbusContext,
         devices: &mut [DeviceState],
     ) -> Result<()> {
-        let client = AsyncClient::new(ctx, SunSpecConfig::default());
+        let client = AsyncClient::new(
+            ctx,
+            SunSpecConfig {
+                read_timeout: Some(Duration::from_secs(5)),
+                ..SunSpecConfig::default()
+            },
+        );
 
         // Initial discovery and Model 1 poll
         for device_state in devices.iter_mut() {
