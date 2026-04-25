@@ -770,7 +770,7 @@ mod tests {
         };
         let (topic, payload) = task.discovery_message("SN123", &ctx);
 
-        assert_eq!(topic, "homeassistant/sensor/SN123_W/config");
+        assert_eq!(topic, "homeassistant/sensor/SN123/W/config");
         assert!(payload.contains("\"state_topic\":\"solar/inverter/SN123\""));
         assert!(payload.contains("\"unique_id\":\"solar_SN123_W\""));
         assert!(payload.contains("\"manufacturer\":\"Brand\""));
@@ -798,7 +798,7 @@ mod tests {
         };
         let (topic, payload) = task.discovery_message("SN123", &ctx);
 
-        assert_eq!(topic, "homeassistant/sensor/SN123_St/config");
+        assert_eq!(topic, "homeassistant/sensor/SN123/St/config");
         assert!(payload.contains("\"device_class\":\"enum\""));
         assert!(payload.contains("\"options\":[\"OFF\",\"ON\"]"));
         assert!(!payload.contains("\"sw_version\""));
