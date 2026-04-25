@@ -88,16 +88,42 @@ async fn main() -> anyhow::Result<()> {
         let conn_certs = Arc::clone(&root_cert_store);
 
         let handle = tokio::spawn(async move {
-            let task = ConnectionTask::new(
-                conn_config,
-                mqtt_tx,
-                topic_prefix,
-                ha_prefix,
-                token,
-                conn_certs,
-            );
-            if let Err(e) = task.run().await {
-                error!("Connection task failed: {}", e);
+            while !token.is_cancelled() {
+                let task = ConnectionTask::new(
+                    conn_config.clone(),
+                    mqtt_tx.clone(),
+                    topic_prefix.clone(),
+                    ha_prefix.clone(),
+                    token.clone(),
+                    conn_certs.clone(),
+                );
+
+                let handle = tokio::spawn(async move { task.run().await });
+                match handle.await {
+                    Ok(Ok(_)) => {
+                        info!("Connection task finished cleanly");
+                        break;
+                    }
+                    Ok(Err(e)) => {
+                        error!("Connection task failed: {}. Restarting in 5s...", e);
+                    }
+                    Err(e) => {
+                        if e.is_panic() {
+                            error!("Connection task panicked. Restarting in 5s...");
+                        } else {
+                            error!("Connection task join error: {}. Exiting loop.", e);
+                            break;
+                        }
+                    }
+                }
+
+                if token.is_cancelled() {
+                    break;
+                }
+                tokio::select! {
+                    _ = tokio::time::sleep(tokio::time::Duration::from_secs(5)) => {}
+                    _ = token.cancelled() => break,
+                }
             }
         });
         connection_handles.push(handle);
