@@ -3,14 +3,15 @@
 ## Description
 
 Publish data from SunSpec-compliant inverters to an MQTT broker, including
-Home Assistant MQTT discovery.
+Home Assistant autodiscovery.
 
 This service is written in **Rust** and uses asynchronous communication to
 efficiently poll multiple inverters.
 
-It allows you to have all of the data of your PV inverters together in one place
-on a local machine, instead of using a different API (and possibly cloud service)
-for each one. It also allows multiple "readers" to use the data without conflict.
+It allows you to have all of the data of your solar (PV) inverters together in
+one place on a local machine, instead of using a different API (and possibly
+cloud services) for each one. It also allows multiple readers to use the
+data without conflict.
 
 One `pv2mqtt` instance can poll multiple devices on multiple buses (Modbus-TCP or
 Modbus-RTU) and the refresh interval is configurable per device.
@@ -25,10 +26,12 @@ cp pv2mqtt.toml.example pv2mqtt.toml
 ```
 
 The configuration file uses the [TOML](https://toml.io/) format and contains:
-* **MQTT settings**: Broker URL, topic prefixes for data and Home Assistant discovery.
-* **Connections**: One or more Modbus connections (TCP or RTU).
-* **Devices**: One or more SunSpec devices per connection, each with its own
+* MQTT settings: Broker URL, topic prefixes for data and Home Assistant discovery.
+* Connections: One or more Modbus connections (TCP or RTU).
+* Devices: One or more SunSpec devices per Connection, each with its own
   Unit ID and polling interval.
+
+The example configuration file contains documentation in the form of comments.
 
 ## Building and Running
 
@@ -69,13 +72,13 @@ Note: `pv2mqtt` expects `pv2mqtt.toml` to be in the current working directory.
 
 ## Features
 
-- **SunSpec Support**: Supports inverters that support the Sunspec protocol, and
+- *SunSpec Support*: Supports inverters that support the Sunspec protocol, and
   expose at least one of the following "models": 101, 102, 103, 111, 112, 113.
-- **Home Assistant Discovery**: Automatically registers inverters in Home Assistant
+- *Home Assistant Discovery*: Automatically registers inverters in Home Assistant
   using MQTT autodiscovery.
-- **JSON over MQTT**: Publishes data to MQTT in JSON format.
-- **Security**: Supports TLS connections for MQTT and Modbus-TCP.
-- **Robust**: Handles connection drops and reconnects automatically.
+- *JSON over MQTT*: Publishes data to MQTT in JSON format.
+- *Security*: Supports TLS connections for MQTT and Modbus-TCP.
+- *Robust*: Handles connection drops and reconnects automatically.
 
 ## Tested devices
 

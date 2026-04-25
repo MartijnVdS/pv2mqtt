@@ -116,7 +116,7 @@ impl Config {
                         let parts: Vec<&str> = address.split(':').collect();
                         if parts.len() != 2 {
                             anyhow::bail!(
-                                "Invalid TCP address '{}' in connection '{}'. Expected 'host:port' or 'ip:port'.",
+                                "Invalid TCP address '{}' in connection '{}'. Expected 'hostname:port' or 'ip:port'.",
                                 address,
                                 conn.name
                             );
