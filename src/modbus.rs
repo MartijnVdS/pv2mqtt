@@ -105,7 +105,11 @@ impl ConnectionTask {
                                 break;
                             }
                             if let Err(e) = self.run_polling_loop(&mut devices).await {
-                                error!("Error in polling loop: {}. Reconnecting...", e);
+                                error!("Error in polling loop: {}. Reconnecting in 10s...", e);
+                                tokio::select! {
+                                    _ = tokio::time::sleep(Duration::from_secs(10)) => {}
+                                    _ = self.token.cancelled() => break,
+                                }
                             }
                         }
                         Err(e) => {
@@ -149,7 +153,9 @@ impl ConnectionTask {
         let client = AsyncClient::new(
             ctx,
             SunSpecConfig {
-                read_timeout: Some(Duration::from_secs(5)),
+                // Disable read timeout in the SunSpec library
+                // We have our own timeout for a poll cycle
+                read_timeout: None,
                 ..SunSpecConfig::default()
             },
         );
@@ -224,10 +230,11 @@ impl ConnectionTask {
                         }
                         Ok(Err(e)) => {
                             if device_state.serial.is_none() {
-                                warn!(
-                                    "Failed to read Model 1 from device {} and no previous serial known: {}",
+                                error!(
+                                    "Failed to read Model 1 from device {}: {}",
                                     device_state.config.unit_id, e
                                 );
+                                return Err(e.into());
                             } else {
                                 info!(
                                     "Failed to refresh Model 1 for device, using cached info (Serial: {:?})",
@@ -236,10 +243,11 @@ impl ConnectionTask {
                             }
                         }
                         Err(_) => {
-                            warn!(
+                            error!(
                                 "Timeout reading Model 1 from device {}",
                                 device_state.config.unit_id
                             );
+                            return Err(anyhow::anyhow!("Timeout reading Model 1"));
                         }
                     }
 
@@ -251,6 +259,7 @@ impl ConnectionTask {
                         "Failed to discover device {}: {}",
                         device_state.config.unit_id, e
                     );
+                    return Err(e.into());
                 }
             }
         }
@@ -473,6 +482,7 @@ impl ConnectionTask {
                             retain: false,
                         })
                         .await;
+                    return Err(e);
                 }
                 Err(_) => {
                     error!("Timeout polling");
@@ -490,6 +500,7 @@ impl ConnectionTask {
                             retain: false,
                         })
                         .await;
+                    return Err(anyhow::anyhow!("Timeout polling device {}", serial));
                 }
             }
         }
