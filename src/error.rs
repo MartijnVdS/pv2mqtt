@@ -79,7 +79,9 @@ impl From<tokio_serial::Error> for Pv2MqttError {
 impl Pv2MqttError {
     pub fn category(&self) -> &'static str {
         match self {
-            Pv2MqttError::ModbusConnection(_) | Pv2MqttError::ModbusTcpConnection(_) => "CONNECTION_ERROR",
+            Pv2MqttError::ModbusConnection(_) | Pv2MqttError::ModbusTcpConnection(_) => {
+                "CONNECTION_ERROR"
+            }
             Pv2MqttError::ModbusTimeout(_) => "TIMEOUT_ERROR",
             Pv2MqttError::DeviceDiscovery(_, _) => "DISCOVERY_ERROR",
             Pv2MqttError::ModelRead(_, _) => "READ_ERROR",

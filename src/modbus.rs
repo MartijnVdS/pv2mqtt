@@ -197,7 +197,10 @@ impl ConnectionTask {
                             .join(", ");
                         return Err(Pv2MqttError::DeviceDiscovery(
                             device_state.config.unit_id,
-                            format!("No supported inverter model found. Available: {}", available),
+                            format!(
+                                "No supported inverter model found. Available: {}",
+                                available
+                            ),
                         )
                         .into());
                     }
@@ -282,10 +285,8 @@ impl ConnectionTask {
                     device_state.device = Some(device);
                 }
                 Err(e) => {
-                    let pv_err = Pv2MqttError::DeviceDiscovery(
-                        device_state.config.unit_id,
-                        e.to_string(),
-                    );
+                    let pv_err =
+                        Pv2MqttError::DeviceDiscovery(device_state.config.unit_id, e.to_string());
                     error!("{}", pv_err);
                     return Err(pv_err);
                 }
@@ -303,8 +304,15 @@ impl ConnectionTask {
                     tokio::net::TcpStream::connect(address),
                 )
                 .await
-                .map_err(|_| Pv2MqttError::ModbusTcpConnection(format!("Timeout connecting to {}", address)))?
-                .map_err(|e| Pv2MqttError::ModbusTcpConnection(format!("Failed to connect to {}: {}", address, e)))?;
+                .map_err(|_| {
+                    Pv2MqttError::ModbusTcpConnection(format!("Timeout connecting to {}", address))
+                })?
+                .map_err(|e| {
+                    Pv2MqttError::ModbusTcpConnection(format!(
+                        "Failed to connect to {}: {}",
+                        address, e
+                    ))
+                })?;
 
                 if *tls {
                     let config = ClientConfig::builder()
@@ -312,12 +320,13 @@ impl ConnectionTask {
                         .with_no_client_auth();
                     let connector = TlsConnector::from(Arc::new(config));
 
-                    let host = address
-                        .split(':')
-                        .next()
-                        .ok_or_else(|| Pv2MqttError::ModbusTcpConnection("Invalid address".to_string()))?;
+                    let host = address.split(':').next().ok_or_else(|| {
+                        Pv2MqttError::ModbusTcpConnection("Invalid address".to_string())
+                    })?;
                     let server_name = ServerName::try_from(host)
-                        .map_err(|e| Pv2MqttError::ModbusTcpConnection(format!("invalid server name: {}", e)))?
+                        .map_err(|e| {
+                            Pv2MqttError::ModbusTcpConnection(format!("invalid server name: {}", e))
+                        })?
                         .to_owned();
 
                     let tls_stream = tokio::time::timeout(
@@ -331,7 +340,9 @@ impl ConnectionTask {
                             address
                         ))
                     })?
-                    .map_err(|e| Pv2MqttError::ModbusTcpConnection(format!("TLS handshake failed: {}", e)))?;
+                    .map_err(|e| {
+                        Pv2MqttError::ModbusTcpConnection(format!("TLS handshake failed: {}", e))
+                    })?;
                     Ok(tcp::attach(tls_stream))
                 } else {
                     Ok(tcp::attach(stream))
@@ -537,7 +548,8 @@ impl ConnectionTask {
                     return Err(pv_err);
                 }
                 Err(_) => {
-                    let pv_err = Pv2MqttError::ModbusTimeout(format!("Timeout polling device {}", serial));
+                    let pv_err =
+                        Pv2MqttError::ModbusTimeout(format!("Timeout polling device {}", serial));
                     error!("{}", pv_err);
                     let (status_topic, status_payload) = self.status_message(
                         serial,

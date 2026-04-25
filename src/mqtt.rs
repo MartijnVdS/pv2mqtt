@@ -42,8 +42,9 @@ impl MqttTask {
     }
 
     async fn run_internal(mut self) -> Result<()> {
-        let mut url = url::Url::parse(&self.config.url)
-            .map_err(|e| Pv2MqttError::MqttConnection(format!("Failed to parse MQTT URL: {}", e)))?;
+        let mut url = url::Url::parse(&self.config.url).map_err(|e| {
+            Pv2MqttError::MqttConnection(format!("Failed to parse MQTT URL: {}", e))
+        })?;
         url.query_pairs_mut()
             .append_pair("client_id", &self.config.client_id);
 
@@ -54,12 +55,14 @@ impl MqttTask {
         // a default TLS configuration. Since we want to provide our own
         // via set_transport, we change the scheme to mqtt:// for parsing.
         if is_tls {
-            url.set_scheme("mqtt")
-                .map_err(|_| Pv2MqttError::MqttConnection("failed to set scheme to mqtt".to_string()))?;
+            url.set_scheme("mqtt").map_err(|_| {
+                Pv2MqttError::MqttConnection("failed to set scheme to mqtt".to_string())
+            })?;
         }
 
-        let mut mqttoptions = MqttOptions::parse_url(url.as_str())
-            .map_err(|e| Pv2MqttError::MqttConnection(format!("Failed to parse URL for rumqttc: {}", e)))?;
+        let mut mqttoptions = MqttOptions::parse_url(url.as_str()).map_err(|e| {
+            Pv2MqttError::MqttConnection(format!("Failed to parse URL for rumqttc: {}", e))
+        })?;
         mqttoptions.set_keep_alive(30);
 
         if is_tls {
@@ -74,7 +77,10 @@ impl MqttTask {
 
         let (client, mut eventloop) = AsyncClient::new(mqttoptions, 20);
 
-        info!("MQTT task starting connection to {}", self.config.masked_url());
+        info!(
+            "MQTT task starting connection to {}",
+            self.config.masked_url()
+        );
 
         let eventloop_handle = tokio::spawn(
             async move {

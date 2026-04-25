@@ -94,8 +94,9 @@ fn default_polling_interval() -> u64 {
 impl Config {
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path_ref = path.as_ref();
-        let content = fs::read_to_string(path_ref)
-            .map_err(|e| Pv2MqttError::Config(format!("Failed to read config file {:?}: {}", path_ref, e)))?;
+        let content = fs::read_to_string(path_ref).map_err(|e| {
+            Pv2MqttError::Config(format!("Failed to read config file {:?}: {}", path_ref, e))
+        })?;
         let config: Config = toml::from_str(&content)
             .map_err(|e| Pv2MqttError::Config(format!("Failed to parse config TOML: {}", e)))?;
         config.validate()?;
@@ -113,23 +114,41 @@ impl Config {
                 return Err(Pv2MqttError::Config(format!("MQTT {} cannot be empty", name)).into());
             }
             if value.ends_with('/') {
-                return Err(Pv2MqttError::Config(format!("MQTT {} '{}' cannot end with a slash", name, value)).into());
+                return Err(Pv2MqttError::Config(format!(
+                    "MQTT {} '{}' cannot end with a slash",
+                    name, value
+                ))
+                .into());
             }
             if value.contains("//") {
-                return Err(Pv2MqttError::Config(format!("MQTT {} '{}' cannot contain double slashes", name, value)).into());
+                return Err(Pv2MqttError::Config(format!(
+                    "MQTT {} '{}' cannot contain double slashes",
+                    name, value
+                ))
+                .into());
             }
         }
 
         if self.connections.is_empty() {
-            return Err(Pv2MqttError::Config("At least one connection must be defined".to_string()).into());
+            return Err(Pv2MqttError::Config(
+                "At least one connection must be defined".to_string(),
+            )
+            .into());
         }
 
         for conn in &self.connections {
             if conn.name.trim().is_empty() {
-                return Err(Pv2MqttError::Config("Connection name cannot be empty or only whitespace".to_string()).into());
+                return Err(Pv2MqttError::Config(
+                    "Connection name cannot be empty or only whitespace".to_string(),
+                )
+                .into());
             }
             if conn.devices.is_empty() {
-                return Err(Pv2MqttError::Config(format!("Connection '{}' must have at least one device", conn.name)).into());
+                return Err(Pv2MqttError::Config(format!(
+                    "Connection '{}' must have at least one device",
+                    conn.name
+                ))
+                .into());
             }
 
             match &conn.modbus {
@@ -147,15 +166,16 @@ impl Config {
                         if parts[0].is_empty() {
                             return Err(Pv2MqttError::Config(format!(
                                 "Host part of address '{}' cannot be empty in connection '{}'",
-                                address,
-                                conn.name
-                            )).into());
+                                address, conn.name
+                            ))
+                            .into());
                         }
-                        let _: u16 = parts[1].parse()
-                            .map_err(|e| Pv2MqttError::Config(format!(
+                        let _: u16 = parts[1].parse().map_err(|e| {
+                            Pv2MqttError::Config(format!(
                                 "Invalid port in TCP address '{}' in connection '{}': {}",
                                 address, conn.name, e
-                            )))?;
+                            ))
+                        })?;
                     }
                 }
                 ModbusConfig::Rtu {
@@ -230,10 +250,7 @@ mod tests {
             topic_prefix: "pv2mqtt".to_string(),
             ha_prefix: "homeassistant".to_string(),
         };
-        assert_eq!(
-            config.masked_url(),
-            "mqtt://user:********@localhost:1883"
-        );
+        assert_eq!(config.masked_url(), "mqtt://user:********@localhost:1883");
 
         let config_no_pass = MqttConfig {
             url: "mqtt://localhost:1883".to_string(),
