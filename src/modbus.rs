@@ -111,49 +111,21 @@ impl ConnectionTask {
                 info!("Attempting to reconnect");
             }
 
-            match self.establish_connection().await {
-                Ok(ctx) => {
-                    info!("Connected");
-                    match self.initialize_devices(ctx, &mut devices).await {
-                        Ok(_) => {
-                            if let Err(e) = self.run_polling_loop(&mut devices).await {
-                                error!(
-                                    "Error in polling loop: {}. Reconnecting in {}s...",
-                                    e, RECONNECT_TIMEOUT
-                                );
-                                tokio::select! {
-                                    _ = tokio::time::sleep(Duration::from_secs(RECONNECT_TIMEOUT)) => {}
-                                    _ = self.token.cancelled() => break,
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            tokio::select! {
-                                biased;
-                                _ = self.token.cancelled() => break,
-                                _ = async {
-                                    error!(
-                                        "Failed to initialize devices: {}. Reconnecting in {}s...",
-                                        e, RECONNECT_TIMEOUT
-                                    );
-                                    tokio::time::sleep(Duration::from_secs(RECONNECT_TIMEOUT)).await
-                                } => {}
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    tokio::select! {
-                        biased;
-                        _ = self.token.cancelled() => break,
-                        _ = async {
-                            error!(
-                                "Failed to establish connection: {}. Reconnecting in 10s...",
-                                e
-                            );
-                            tokio::time::sleep(Duration::from_secs(10))
-                        } => {}
-                    }
+            let result: Result<()> = async {
+                let ctx = self.establish_connection().await?;
+                info!("Connected");
+                self.initialize_devices(ctx, &mut devices).await?;
+                self.run_polling_loop(&mut devices).await?;
+                Ok(())
+            }
+            .await;
+
+            if let Err(e) = result {
+                error!("Error: {}. Reconnecting in {}s...", e, RECONNECT_TIMEOUT);
+                tokio::select! {
+                    biased;
+                    _ = self.token.cancelled() => break,
+                    _ = tokio::time::sleep(Duration::from_secs(RECONNECT_TIMEOUT)) => {}
                 }
             }
             first_run = false;
@@ -183,118 +155,97 @@ impl ConnectionTask {
             if self.token.is_cancelled() {
                 return Ok(());
             }
-            match client.device(device_state.config.unit_id).await {
-                Ok(device) => {
-                    // Find supported inverter model (do this first as it's needed for polling)
-                    let supported = [101, 102, 103, 111, 112, 113];
-                    let available_models = device.models.supported_model_ids();
-                    for id in supported {
-                        if available_models.contains(&id) {
-                            device_state.supported_model = Some(id);
-                            break;
-                        }
-                    }
 
-                    if device_state.supported_model.is_none() {
-                        let available = available_models
-                            .iter()
-                            .map(|id| id.to_string())
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        return Err(Pv2MqttError::DeviceDiscovery(
-                            device_state.config.unit_id,
-                            format!(
-                                "No supported inverter model found. Available: {}",
-                                available
-                            ),
-                        ));
-                    }
-
-                    // Try to read Model 1 for metadata/serial
-                    match tokio::time::timeout(
-                        Duration::from_secs(10),
-                        device.read_model::<Model1>(),
-                    )
-                    .instrument(info_span!(
-                        "model1_read",
-                        unit_id = device_state.config.unit_id
-                    ))
+            let unit_id = device_state.config.unit_id;
+            let res: Result<()> = async {
+                let device = client
+                    .device(unit_id)
                     .await
-                    {
-                        Ok(Ok(m1)) => {
-                            let serial = m1.sn.trim().to_string();
-                            let manufacturer = m1.mn.trim().to_string();
-                            let model = m1.md.trim().to_string();
-                            let version_opt = m1
-                                .vr
-                                .as_ref()
-                                .map(|v| v.trim().to_string())
-                                .filter(|v| !v.is_empty());
+                    .map_err(|e| Pv2MqttError::DeviceDiscovery(unit_id, e.to_string()))?;
 
-                            if serial.is_empty() {
-                                warn!(
-                                    "Device {} returned an empty serial number, skipping discovery",
-                                    device_state.config.unit_id
-                                );
-                                continue;
-                            }
+                // Find supported inverter model
+                let supported = [101, 102, 103, 111, 112, 113];
+                let available_models = device.models.supported_model_ids();
+                device_state.supported_model = supported.into_iter().find(|id| available_models.contains(id));
 
-                            // Only log and publish discovery if it's new or changed
-                            if device_state.serial.as_ref() != Some(&serial) {
-                                info!(
-                                    "Discovered device: {} {} (Serial: {})",
-                                    manufacturer, model, serial
-                                );
-                                device_state.serial = Some(serial.clone());
-                                device_state.manufacturer = Some(manufacturer.clone());
-                                device_state.model = Some(model.clone());
-                                device_state.version = version_opt.clone();
-                                self.publish_discovery(
-                                    &serial,
-                                    &manufacturer,
-                                    &model,
-                                    version_opt.as_deref(),
-                                    device_state.supported_model,
-                                )
-                                .await?;
-                            } else {
-                                info!("Refreshed connection to device (Serial: {})", serial);
-                            }
+                if device_state.supported_model.is_none() {
+                    let available = available_models
+                        .iter()
+                        .map(|id| id.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    return Err(Pv2MqttError::DeviceDiscovery(
+                        unit_id,
+                        format!("No supported inverter model found. Available: {}", available),
+                    ));
+                }
+
+                // Try to read Model 1 for metadata/serial
+                let m1_res = tokio::time::timeout(Duration::from_secs(10), device.read_model::<Model1>())
+                    .instrument(info_span!("model1_read", unit_id))
+                    .await;
+
+                match m1_res {
+                    Ok(Ok(m1)) => {
+                        let serial = m1.sn.trim().to_string();
+                        let manufacturer = m1.mn.trim().to_string();
+                        let model = m1.md.trim().to_string();
+                        let version_opt = m1
+                            .vr
+                            .as_ref()
+                            .map(|v| v.trim().to_string())
+                            .filter(|v| !v.is_empty());
+
+                        if serial.is_empty() {
+                            warn!("Device {} returned an empty serial number, skipping discovery", unit_id);
+                            return Ok(());
                         }
-                        Ok(Err(e)) => {
-                            if device_state.serial.is_none() {
-                                let pv_err = Pv2MqttError::ModelRead(1, e.to_string());
-                                error!(
-                                    "Failed to read Model 1 from device {}: {}",
-                                    device_state.config.unit_id, pv_err
-                                );
-                                return Err(pv_err);
-                            } else {
-                                info!(
-                                    "Failed to refresh Model 1 for device, using cached info (Serial: {:?})",
-                                    device_state.serial
-                                );
-                            }
-                        }
-                        Err(_) => {
-                            let pv_err = Pv2MqttError::ModbusTimeout(format!(
-                                "Timeout reading Model 1 from device {}",
-                                device_state.config.unit_id
-                            ));
-                            error!("{}", pv_err);
-                            return Err(pv_err);
+
+                        // Only log and publish discovery if it's new or changed
+                        if device_state.serial.as_ref() != Some(&serial) {
+                            info!("Discovered device: {} {} (Serial: {})", manufacturer, model, serial);
+                            device_state.serial = Some(serial.clone());
+                            device_state.manufacturer = Some(manufacturer.clone());
+                            device_state.model = Some(model.clone());
+                            device_state.version = version_opt.clone();
+                            self.publish_discovery(
+                                &serial,
+                                &manufacturer,
+                                &model,
+                                version_opt.as_deref(),
+                                device_state.supported_model,
+                            )
+                            .await?;
+                        } else {
+                            info!("Refreshed connection to device (Serial: {})", serial);
                         }
                     }
+                    Ok(Err(e)) => {
+                        if device_state.serial.is_none() {
+                            return Err(Pv2MqttError::ModelRead(1, e.to_string()));
+                        }
+                        info!(
+                            "Failed to refresh Model 1 for device, using cached info (Serial: {:?})",
+                            device_state.serial
+                        );
+                    }
+                    Err(_) => {
+                        return Err(Pv2MqttError::ModbusTimeout(format!(
+                            "Timeout reading Model 1 from device {}",
+                            unit_id
+                        )));
+                    }
+                }
 
-                    // Store the device for later use
-                    device_state.device = Some(device);
-                }
-                Err(e) => {
-                    let pv_err =
-                        Pv2MqttError::DeviceDiscovery(device_state.config.unit_id, e.to_string());
-                    error!("{}", pv_err);
-                    return Err(pv_err);
-                }
+                // Store the device for later use
+                device_state.device = Some(device);
+                Ok(())
+            }
+            .await;
+
+            if let Err(e) = res {
+                error!("Failed to initialize device {}: {}", unit_id, e);
+                return Err(e);
             }
         }
         Ok(())
