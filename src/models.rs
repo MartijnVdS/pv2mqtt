@@ -9,9 +9,9 @@ use sunspec::models::{
 
 pub static SUPPORTED_MODELS: &[u16] = &[101, 102, 103, 111, 112, 113];
 
-const SUNSPEC_UNIMPLEMENTED_U32 : u32 = 0xFFFFFFFF;
-const SUNSPEC_UNIMPLEMENTED_U16 : u16 = 0xFFFF;
-const SUNSPEC_UNIMPLEMENTED_I16 : i16 = -32768;
+const SUNSPEC_UNIMPLEMENTED_U32: u32 = 0xFFFFFFFF;
+const SUNSPEC_UNIMPLEMENTED_U16: u16 = 0xFFFF;
+const SUNSPEC_UNIMPLEMENTED_I16: i16 = -32768;
 
 #[derive(Debug, Serialize, Default, Clone)]
 pub struct InverterData {
@@ -527,7 +527,10 @@ mod tests {
         assert_eq!(apply_sf_i16_opt(None, Some(-1)), None);
         assert_eq!(apply_sf_i16_opt(Some(100), None), None);
         assert_eq!(apply_sf_i16_opt(None, None), None);
-        assert_eq!(apply_sf_i16_opt(Some(SUNSPEC_UNIMPLEMENTED_I16), Some(-1)), None);
+        assert_eq!(
+            apply_sf_i16_opt(Some(SUNSPEC_UNIMPLEMENTED_I16), Some(-1)),
+            None
+        );
     }
 
     #[test]

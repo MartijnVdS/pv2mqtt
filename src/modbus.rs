@@ -24,8 +24,11 @@ use tokio_serial::SerialStream;
 use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, debug, error, info, info_span, trace, warn};
 
-const RECONNECT_TIMEOUT: u64 = 10;
-const POLL_TIMEOUT: u64 = 10;
+const CONNECT_TIMEOUT_SECS: u64 = 10;
+const RECONNECT_TIMEOUT_SECS: u64 = 10;
+
+const READ_TIMEOUT_SECS: u64 = 10;
+const POLL_TIMEOUT_SECS: u64 = 10;
 
 pub struct ConnectionTask {
     config: ConnectionConfig,
@@ -121,11 +124,11 @@ impl ConnectionTask {
             .await;
 
             if let Err(e) = result {
-                error!("Error: {}. Reconnecting in {}s...", e, RECONNECT_TIMEOUT);
+                error!("Error: {}. Reconnecting in {}s...", e, RECONNECT_TIMEOUT_SECS);
                 tokio::select! {
                     biased;
                     _ = self.token.cancelled() => break,
-                    _ = tokio::time::sleep(Duration::from_secs(RECONNECT_TIMEOUT)) => {}
+                    _ = tokio::time::sleep(Duration::from_secs(RECONNECT_TIMEOUT_SECS)) => {}
                 }
             }
             first_run = false;
@@ -183,7 +186,7 @@ impl ConnectionTask {
                 }
 
                 // Try to read Model 1 for metadata/serial
-                let m1_res = tokio::time::timeout(Duration::from_secs(10), device.read_model::<Model1>())
+                let m1_res = tokio::time::timeout(Duration::from_secs(POLL_TIMEOUT_SECS), device.read_model::<Model1>())
                     .instrument(info_span!("model1_read", unit_id))
                     .await;
 
@@ -258,7 +261,7 @@ impl ConnectionTask {
             ModbusConfig::Tcp { address, tls } => {
                 info!("Connecting to Modbus TCP at {} (TLS: {})", address, tls);
                 let stream = tokio::time::timeout(
-                    Duration::from_secs(10),
+                    Duration::from_secs(CONNECT_TIMEOUT_SECS),
                     tokio::net::TcpStream::connect(address),
                 )
                 .await
@@ -288,7 +291,7 @@ impl ConnectionTask {
                         .to_owned();
 
                     let tls_stream = tokio::time::timeout(
-                        Duration::from_secs(10),
+                        Duration::from_secs(CONNECT_TIMEOUT_SECS),
                         connector.connect(server_name, stream),
                     )
                     .await
@@ -388,7 +391,7 @@ impl ConnectionTask {
                         let mut ctx = device.client.lock().await;
                         ctx.set_slave(Slave(device.slave_id));
                         let _ = tokio::time::timeout(
-                            Duration::from_secs(5),
+                            Duration::from_secs(READ_TIMEOUT_SECS),
                             ctx.read_holding_registers(addr, 2),
                         )
                         .await
@@ -454,7 +457,7 @@ impl ConnectionTask {
             &device_state.device,
         ) {
             let poll_result = tokio::time::timeout(
-                Duration::from_secs(POLL_TIMEOUT),
+                Duration::from_secs(POLL_TIMEOUT_SECS),
                 self.poll_device(device, model_id),
             )
             .await;

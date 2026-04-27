@@ -6,6 +6,10 @@ use std::fs;
 use std::net::SocketAddr;
 use std::path::Path;
 
+const MAX_POLL_SECS: u64 = 3600;
+const MAX_KEEPALIVE_SECS: u64 = 3600;
+const MAX_MODBUS_UNIT_ID: u8 = 247;
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
     pub mqtt: MqttConfig,
@@ -192,11 +196,11 @@ impl Config {
                 }
             }
 
-            if conn.keep_alive_interval.is_some_and(|ka| ka > 3600) {
+            if conn.keep_alive_interval.is_some_and(|ka| ka > MAX_KEEPALIVE_SECS) {
                 let ka = conn.keep_alive_interval.unwrap();
                 return Err(Pv2MqttError::Config(format!(
-                    "Keep-alive interval {} is too large in connection '{}' (max 3600s)",
-                    ka, conn.name
+                    "Keep-alive interval {} is too large in connection '{}' (max {}s)",
+                    ka, conn.name, MAX_KEEPALIVE_SECS
                 )));
             }
 
@@ -208,16 +212,16 @@ impl Config {
                         device.unit_id, conn.name
                     )));
                 }
-                if device.unit_id == 0 || device.unit_id > 247 {
+                if device.unit_id == 0 || device.unit_id > MAX_MODBUS_UNIT_ID {
                     return Err(Pv2MqttError::Config(format!(
-                        "Device unit_id {} is out of valid Modbus range (1-247) in connection '{}'",
-                        device.unit_id, conn.name
+                        "Device unit_id {} is out of valid Modbus range (1-{}) in connection '{}'",
+                        device.unit_id, MAX_MODBUS_UNIT_ID, conn.name
                     )));
                 }
-                if !(1..=3600).contains(&device.interval) {
+                if !(1..=MAX_POLL_SECS).contains(&device.interval) {
                     return Err(Pv2MqttError::Config(format!(
-                        "Device polling interval {} is out of reasonable range (1-3600s) in connection '{}'",
-                        device.interval, conn.name
+                        "Device polling interval {} is out of reasonable range (1-{}s) in connection '{}'",
+                        device.interval, MAX_POLL_SECS, conn.name
                     )));
                 }
             }

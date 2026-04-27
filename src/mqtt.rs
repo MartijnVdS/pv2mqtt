@@ -10,6 +10,9 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::{Instrument, debug, error, info, info_span, trace};
 
+const MQTT_KEEPALIVE_INTERVAL_SECS: u16 = 30;
+const MQTT_SHUTDOWN_DELAY: u64 = 500;
+
 #[derive(Debug)]
 pub enum MqttMessage {
     Publish {
@@ -82,7 +85,7 @@ impl MqttTask {
         let mut mqttoptions = MqttOptions::parse_url(url.as_str()).map_err(|e| {
             Pv2MqttError::MqttConnection(format!("Failed to parse URL for rumqttc: {}", e))
         })?;
-        mqttoptions.set_keep_alive(30);
+        mqttoptions.set_keep_alive(MQTT_KEEPALIVE_INTERVAL_SECS);
 
         if is_tls {
             let client_config = rustls::ClientConfig::builder()
@@ -127,7 +130,7 @@ impl MqttTask {
         info!("MQTT task shutting down (channel closed)");
         let _ = client.disconnect().await;
         // Give it a moment to flush the disconnect packet
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        tokio::time::sleep(Duration::from_millis(MQTT_SHUTDOWN_DELAY)).await;
         eventloop_handle.abort();
 
         Ok(())
