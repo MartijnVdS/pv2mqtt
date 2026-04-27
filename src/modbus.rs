@@ -24,6 +24,9 @@ use tokio_serial::SerialStream;
 use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, debug, error, info, info_span, trace, warn};
 
+const RECONNECT_TIMEOUT: u64 = 10;
+const POLL_TIMEOUT: u64 = 10;
+
 pub struct ConnectionTask {
     config: ConnectionConfig,
     mqtt_tx: mpsc::Sender<MqttMessage>,
@@ -113,40 +116,43 @@ impl ConnectionTask {
                     info!("Connected");
                     match self.initialize_devices(ctx, &mut devices).await {
                         Ok(_) => {
-                            if self.token.is_cancelled() {
-                                break;
-                            }
                             if let Err(e) = self.run_polling_loop(&mut devices).await {
-                                error!("Error in polling loop: {}. Reconnecting in 10s...", e);
+                                error!(
+                                    "Error in polling loop: {}. Reconnecting in {}s...",
+                                    e, RECONNECT_TIMEOUT
+                                );
                                 tokio::select! {
-                                    _ = tokio::time::sleep(Duration::from_secs(10)) => {}
+                                    _ = tokio::time::sleep(Duration::from_secs(RECONNECT_TIMEOUT)) => {}
                                     _ = self.token.cancelled() => break,
                                 }
                             }
                         }
                         Err(e) => {
-                            error!(
-                                "Failed to initialize devices: {}. Reconnecting in 10s...",
-                                e
-                            );
                             tokio::select! {
-                                _ = tokio::time::sleep(Duration::from_secs(10)) => {}
+                                biased;
                                 _ = self.token.cancelled() => break,
+                                _ = async {
+                                    error!(
+                                        "Failed to initialize devices: {}. Reconnecting in {}s...",
+                                        e, RECONNECT_TIMEOUT
+                                    );
+                                    tokio::time::sleep(Duration::from_secs(RECONNECT_TIMEOUT)).await
+                                } => {}
                             }
                         }
                     }
                 }
                 Err(e) => {
-                    if self.token.is_cancelled() {
-                        break;
-                    }
-                    error!(
-                        "Failed to establish connection: {}. Reconnecting in 10s...",
-                        e
-                    );
                     tokio::select! {
-                        _ = tokio::time::sleep(Duration::from_secs(10)) => {}
+                        biased;
                         _ = self.token.cancelled() => break,
+                        _ = async {
+                            error!(
+                                "Failed to establish connection: {}. Reconnecting in 10s...",
+                                e
+                            );
+                            tokio::time::sleep(Duration::from_secs(10))
+                        } => {}
                     }
                 }
             }
@@ -494,9 +500,11 @@ impl ConnectionTask {
             device_state.supported_model,
             &device_state.device,
         ) {
-            let poll_result =
-                tokio::time::timeout(Duration::from_secs(10), self.poll_device(device, model_id))
-                    .await;
+            let poll_result = tokio::time::timeout(
+                Duration::from_secs(POLL_TIMEOUT),
+                self.poll_device(device, model_id),
+            )
+            .await;
 
             match poll_result {
                 Ok(Ok(data)) => {

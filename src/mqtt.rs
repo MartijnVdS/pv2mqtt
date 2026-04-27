@@ -2,7 +2,9 @@
 
 use crate::config::MqttConfig;
 use crate::error::{Pv2MqttError, Result};
-use rumqttc::{AsyncClient, Event, Incoming, EventLoop, MqttOptions, QoS, TlsConfiguration, Transport};
+use rumqttc::{
+    AsyncClient, Event, EventLoop, Incoming, MqttOptions, QoS, TlsConfiguration, Transport,
+};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -100,10 +102,7 @@ impl MqttTask {
         );
 
         let eventloop_handle = tokio::spawn(
-            async move {
-                run_eventloop(eventloop).await
-            }
-            .instrument(info_span!("mqtt_eventloop"))
+            async move { run_eventloop(eventloop).await }.instrument(info_span!("mqtt_eventloop")),
         );
 
         while let Some(msg) = self.rx.recv().await {

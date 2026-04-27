@@ -111,7 +111,10 @@ impl Config {
 
         for (name, value) in prefixes {
             if value.is_empty() {
-                return Err(Pv2MqttError::Config(format!("MQTT {} cannot be empty", name)));
+                return Err(Pv2MqttError::Config(format!(
+                    "MQTT {} cannot be empty",
+                    name
+                )));
             }
             if value.ends_with('/') {
                 return Err(Pv2MqttError::Config(format!(
@@ -154,8 +157,7 @@ impl Config {
                         if parts.len() != 2 {
                             return Err(Pv2MqttError::Config(format!(
                                 "Invalid TCP address '{}' in connection '{}'. Expected 'hostname:port' or 'ip:port'.",
-                                address,
-                                conn.name
+                                address, conn.name
                             )));
                         }
                         if parts[0].is_empty() {
@@ -215,8 +217,7 @@ impl Config {
                 if !(1..=3600).contains(&device.interval) {
                     return Err(Pv2MqttError::Config(format!(
                         "Device polling interval {} is out of reasonable range (1-3600s) in connection '{}'",
-                        device.interval,
-                        conn.name
+                        device.interval, conn.name
                     )));
                 }
             }
