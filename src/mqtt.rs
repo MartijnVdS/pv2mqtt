@@ -178,10 +178,10 @@ mod tests {
         let root_cert_store = Arc::new(rustls::RootCertStore::empty());
         let task = MqttTask::new(config, rx, root_cert_store);
 
-        // We don't run it here because it would try to connect to localhost:8883
-        // and fail/hang. But we verified it compiles and the logic in run_internal
-        // is now covered by our manual review and cargo check.
-        // We can at least check if the masked_url is correct.
+        // Don't run the MQTT task here because it would try to connect
+        // to localhost:8883 and fail/hang.
+
+        // But we should at least check if the masked_url is correct.
         assert_eq!(task.config.masked_url(), "mqtts://localhost:8883");
     }
 }
