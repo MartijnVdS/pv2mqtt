@@ -80,43 +80,19 @@ fn apply_sf_opt(val: Option<u16>, sf: i16) -> Option<f32> {
     val.and_then(|v| apply_sf(v, sf))
 }
 
-fn opt_float(val: Option<f32>) -> Option<f32> {
-    val
-}
-
-trait IntoOption<T> {
-    fn into_option(self) -> Option<T>;
-}
-
-impl IntoOption<u16> for u16 {
-    fn into_option(self) -> Option<u16> {
-        Some(self)
-    }
-}
-
-impl IntoOption<u16> for Option<u16> {
-    fn into_option(self) -> Option<u16> {
-        self
-    }
-}
-
-impl IntoOption<f32> for f32 {
-    fn into_option(self) -> Option<f32> {
-        Some(self)
-    }
-}
-
-impl IntoOption<f32> for Option<f32> {
-    fn into_option(self) -> Option<f32> {
-        self
-    }
-}
-
 trait ToStatusString {
     fn to_status_string(&self) -> String;
 }
 
 macro_rules! impl_to_status_string {
+    ($($st_path:path),+; $mapping:tt) => {
+        $(
+            impl_to_status_string_single!($st_path, $mapping);
+        )+
+    };
+}
+
+macro_rules! impl_to_status_string_single {
     ($st_path:path, { $($variant:ident => $val:expr),* $(,)? }) => {
         impl ToStatusString for $st_path {
             fn to_status_string(&self) -> String {
@@ -130,40 +106,27 @@ macro_rules! impl_to_status_string {
     };
 }
 
-impl_to_status_string!(sunspec::models::model101::St, {
-    Off => "OFF",
-    Sleeping => "SLEEPING",
-    Starting => "STARTING",
-    Mppt => "MPPT",
-    Throttled => "THROTTLED",
-    ShuttingDown => "SHUTTING_DOWN",
-    Fault => "FAULT",
-    Standby => "STANDBY",
-});
+impl_to_status_string!(
+    sunspec::models::model101::St,
+    sunspec::models::model102::St,
+    sunspec::models::model103::St,
+    sunspec::models::model112::St,
+    sunspec::models::model113::St;
+    {
+        Off => "OFF",
+        Sleeping => "SLEEPING",
+        Starting => "STARTING",
+        Mppt => "MPPT",
+        Throttled => "THROTTLED",
+        ShuttingDown => "SHUTTING_DOWN",
+        Fault => "FAULT",
+        Standby => "STANDBY",
+    }
+);
 
-impl_to_status_string!(sunspec::models::model102::St, {
-    Off => "OFF",
-    Sleeping => "SLEEPING",
-    Starting => "STARTING",
-    Mppt => "MPPT",
-    Throttled => "THROTTLED",
-    ShuttingDown => "SHUTTING_DOWN",
-    Fault => "FAULT",
-    Standby => "STANDBY",
-});
-
-impl_to_status_string!(sunspec::models::model103::St, {
-    Off => "OFF",
-    Sleeping => "SLEEPING",
-    Starting => "STARTING",
-    Mppt => "MPPT",
-    Throttled => "THROTTLED",
-    ShuttingDown => "SHUTTING_DOWN",
-    Fault => "FAULT",
-    Standby => "STANDBY",
-});
-
-impl_to_status_string!(sunspec::models::model111::St, {
+// For some unknown reason, the "St" type in model 111 is defined with a
+// "Gg" prefix even in the official JSON
+impl_to_status_string!(sunspec::models::model111::St; {
     GgOff => "OFF",
     GgSleeping => "SLEEPING",
     GgStarting => "STARTING",
@@ -174,28 +137,6 @@ impl_to_status_string!(sunspec::models::model111::St, {
     GgStandby => "STANDBY",
 });
 
-impl_to_status_string!(sunspec::models::model112::St, {
-    Off => "OFF",
-    Sleeping => "SLEEPING",
-    Starting => "STARTING",
-    Mppt => "MPPT",
-    Throttled => "THROTTLED",
-    ShuttingDown => "SHUTTING_DOWN",
-    Fault => "FAULT",
-    Standby => "STANDBY",
-});
-
-impl_to_status_string!(sunspec::models::model113::St, {
-    Off => "OFF",
-    Sleeping => "SLEEPING",
-    Starting => "STARTING",
-    Mppt => "MPPT",
-    Throttled => "THROTTLED",
-    ShuttingDown => "SHUTTING_DOWN",
-    Fault => "FAULT",
-    Standby => "STANDBY",
-});
-
 macro_rules! impl_int_model {
     ($model:ident) => {
         impl From<$model> for InverterData {
@@ -203,11 +144,11 @@ macro_rules! impl_int_model {
                 Self {
                     timestamp: Utc::now(),
                     aph_a: apply_sf(m.aph_a, m.a_sf),
-                    aph_b: apply_sf_opt(m.aph_b.into_option(), m.a_sf),
-                    aph_c: apply_sf_opt(m.aph_c.into_option(), m.a_sf),
+                    aph_b: apply_sf_opt(m.aph_b.into(), m.a_sf),
+                    aph_c: apply_sf_opt(m.aph_c.into(), m.a_sf),
                     v_an: apply_sf(m.ph_vph_a, m.v_sf),
-                    v_bn: apply_sf_opt(m.ph_vph_b.into_option(), m.v_sf),
-                    v_cn: apply_sf_opt(m.ph_vph_c.into_option(), m.v_sf),
+                    v_bn: apply_sf_opt(m.ph_vph_b.into(), m.v_sf),
+                    v_cn: apply_sf_opt(m.ph_vph_c.into(), m.v_sf),
                     w: apply_sf_i16(m.w, m.w_sf).unwrap_or(0.0),
                     va: apply_sf_i16_opt(m.va, m.va_sf),
                     v_ar: apply_sf_i16_opt(m.v_ar, m.v_ar_sf),
@@ -232,11 +173,11 @@ macro_rules! impl_float_model {
                 Self {
                     timestamp: Utc::now(),
                     aph_a: Some(m.aph_a),
-                    aph_b: opt_float(m.aph_b.into_option()),
-                    aph_c: opt_float(m.aph_c.into_option()),
+                    aph_b: m.aph_b.into(),
+                    aph_c: m.aph_c.into(),
                     v_an: Some(m.ph_vph_a),
-                    v_bn: opt_float(m.ph_vph_b.into_option()),
-                    v_cn: opt_float(m.ph_vph_c.into_option()),
+                    v_bn: m.ph_vph_b.into(),
+                    v_cn: m.ph_vph_c.into(),
                     w: m.w,
                     va: m.va,
                     v_ar: m.v_ar,
@@ -265,6 +206,24 @@ impl_float_model!(Model113);
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn assert_near(actual: f32, expected: f32) {
+        assert!(
+            (actual - expected).abs() < 0.001,
+            "actual: {}, expected: {}",
+            actual,
+            expected
+        );
+    }
+
+    fn assert_near_opt(actual: Option<f32>, expected: Option<f32>) {
+        match (actual, expected) {
+            (Some(a), Some(e)) => assert_near(a, e),
+            (None, None) => {}
+            _ => panic!("actual: {:?}, expected: {:?}", actual, expected),
+        }
+    }
+
     use sunspec::models::model101::{
         Evt1 as Evt1_101, Evt2 as Evt2_101, EvtVnd1 as EvtVnd1_101, EvtVnd2 as EvtVnd2_101,
         EvtVnd3 as EvtVnd3_101, EvtVnd4 as EvtVnd4_101, St as St101,
@@ -544,23 +503,33 @@ mod tests {
 
     #[test]
     fn test_apply_sf() {
-        assert_eq!(apply_sf(100, 0), Some(100.0));
-        assert_eq!(apply_sf(100, -1), Some(10.0));
-        assert_eq!(apply_sf(100, 1), Some(1000.0));
+        assert_near_opt(apply_sf(100, 0), Some(100.0));
+        assert_near_opt(apply_sf(100, -1), Some(10.0));
+        assert_near_opt(apply_sf(100, 1), Some(1000.0));
         assert_eq!(apply_sf(0xFFFF, -1), None);
     }
 
     #[test]
     fn test_apply_sf_i16() {
-        assert_eq!(apply_sf_i16(100, 0), Some(100.0));
-        assert_eq!(apply_sf_i16(-100, -1), Some(-10.0));
+        assert_near_opt(apply_sf_i16(100, 0), Some(100.0));
+        assert_near_opt(apply_sf_i16(-100, -1), Some(-10.0));
         assert_eq!(apply_sf_i16(-32768, -1), None);
     }
 
     #[test]
+    fn test_apply_sf_i16_opt() {
+        assert_near_opt(apply_sf_i16_opt(Some(100), Some(0)), Some(100.0));
+        assert_near_opt(apply_sf_i16_opt(Some(100), Some(-1)), Some(10.0));
+        assert_eq!(apply_sf_i16_opt(None, Some(-1)), None);
+        assert_eq!(apply_sf_i16_opt(Some(100), None), None);
+        assert_eq!(apply_sf_i16_opt(None, None), None);
+        assert_eq!(apply_sf_i16_opt(Some(-32768), Some(-1)), None);
+    }
+
+    #[test]
     fn test_apply_sf_u32() {
-        assert_eq!(apply_sf_u32(100000, 0), Some(100000.0));
-        assert!((apply_sf_u32(123456, -2).unwrap() - 1234.56).abs() < 0.001);
+        assert_near_opt(apply_sf_u32(100000, 0), Some(100000.0));
+        assert_near(apply_sf_u32(123456, -2).unwrap(), 1234.56);
         assert_eq!(apply_sf_u32(0xFFFFFFFF, -2), None);
     }
 
@@ -573,7 +542,7 @@ mod tests {
 
         let data = InverterData::from(m101);
         assert_eq!(data.v_an, None);
-        assert_eq!(data.w, 0.0);
+        assert_near(data.w, 0.0);
         assert_eq!(data.va, None);
     }
 
@@ -595,12 +564,12 @@ mod tests {
         m101.tmp_sf = -1;
 
         let data = InverterData::from(m101);
-        assert_eq!(data.v_an, Some(230.0));
-        assert_eq!(data.w, 23000.0);
-        assert_eq!(data.hz, 50.0);
-        assert!((data.wh - 1234.56).abs() < 0.001);
+        assert_near_opt(data.v_an, Some(230.0));
+        assert_near(data.w, 23000.0);
+        assert_near(data.hz, 50.0);
+        assert_near(data.wh, 1234.56);
         assert_eq!(data.st, "MPPT");
-        assert_eq!(data.tmp_cab, Some(45.0));
+        assert_near_opt(data.tmp_cab, Some(45.0));
     }
 
     #[test]
@@ -615,8 +584,8 @@ mod tests {
         m102.st = St102::Mppt;
 
         let data = InverterData::from(m102);
-        assert_eq!(data.v_an, Some(230.0));
-        assert_eq!(data.w, 10000.0);
+        assert_near_opt(data.v_an, Some(230.0));
+        assert_near(data.w, 10000.0);
         assert_eq!(data.st, "MPPT");
     }
 
@@ -632,8 +601,8 @@ mod tests {
         m103.st = St103::Mppt;
 
         let data = InverterData::from(m103);
-        assert_eq!(data.v_an, Some(230.0));
-        assert_eq!(data.w, 12000.0);
+        assert_near_opt(data.v_an, Some(230.0));
+        assert_near(data.w, 12000.0);
         assert_eq!(data.st, "MPPT");
     }
 
@@ -646,8 +615,8 @@ mod tests {
         m111.st = St111::GgMppt;
 
         let data = InverterData::from(m111);
-        assert_eq!(data.w, 2300.0);
-        assert_eq!(data.hz, 50.0);
+        assert_near(data.w, 2300.0);
+        assert_near(data.hz, 50.0);
         assert_eq!(data.st, "MPPT");
     }
 
@@ -659,7 +628,7 @@ mod tests {
         m112.st = St112::Mppt;
 
         let data = InverterData::from(m112);
-        assert_eq!(data.w, 8000.0);
+        assert_near(data.w, 8000.0);
         assert_eq!(data.st, "MPPT");
     }
 
@@ -671,7 +640,7 @@ mod tests {
         m113.st = St113::Mppt;
 
         let data = InverterData::from(m113);
-        assert_eq!(data.w, 12000.0);
+        assert_near(data.w, 12000.0);
         assert_eq!(data.st, "MPPT");
     }
 
