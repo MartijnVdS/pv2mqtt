@@ -2,7 +2,7 @@
 
 use crate::config::{ConnectionConfig, DeviceConfig, ModbusConfig, Parity};
 use crate::error::{Pv2MqttError, Result};
-use crate::models::InverterData;
+use crate::models::{InverterData, SUPPORTED_MODELS};
 use crate::mqtt::MqttMessage;
 use chrono::{DateTime, Utc};
 use std::sync::Arc;
@@ -164,9 +164,11 @@ impl ConnectionTask {
                     .map_err(|e| Pv2MqttError::DeviceDiscovery(unit_id, e.to_string()))?;
 
                 // Find supported inverter model
-                let supported = [101, 102, 103, 111, 112, 113];
                 let available_models = device.models.supported_model_ids();
-                device_state.supported_model = supported.into_iter().find(|id| available_models.contains(id));
+                device_state.supported_model = SUPPORTED_MODELS
+                    .iter()
+                    .find(|&&id| available_models.contains(&id))
+                    .copied();
 
                 if device_state.supported_model.is_none() {
                     let available = available_models
@@ -364,7 +366,7 @@ impl ConnectionTask {
             tokio::select! {
                 _ = tokio::time::sleep(sleep_duration) => {}
                 _ = self.token.cancelled() => {
-                    info!("Cancelled");
+                    trace!("Cancelled");
                     return Ok(());
                 }
             }

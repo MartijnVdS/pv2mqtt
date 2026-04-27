@@ -7,6 +7,8 @@ use sunspec::models::{
     model112::Model112, model113::Model113,
 };
 
+pub static SUPPORTED_MODELS: [u16; 6] = [101, 102, 103, 111, 112, 113];
+
 #[derive(Debug, Serialize, Default, Clone)]
 pub struct InverterData {
     pub timestamp: DateTime<Utc>,
