@@ -7,7 +7,11 @@ use sunspec::models::{
     model112::Model112, model113::Model113,
 };
 
-pub static SUPPORTED_MODELS: [u16; 6] = [101, 102, 103, 111, 112, 113];
+pub static SUPPORTED_MODELS: &[u16] = &[101, 102, 103, 111, 112, 113];
+
+const SUNSPEC_UNIMPLEMENTED_U32 : u32 = 0xFFFFFFFF;
+const SUNSPEC_UNIMPLEMENTED_U16 : u16 = 0xFFFF;
+const SUNSPEC_UNIMPLEMENTED_I16 : i16 = -32768;
 
 #[derive(Debug, Serialize, Default, Clone)]
 pub struct InverterData {
@@ -49,21 +53,21 @@ pub struct InverterData {
 }
 
 fn apply_sf(val: u16, sf: i16) -> Option<f32> {
-    if val == 0xFFFF {
+    if val == SUNSPEC_UNIMPLEMENTED_U16 {
         return None;
     }
     Some(val as f32 * 10f32.powi(sf as i32))
 }
 
 fn apply_sf_i16(val: i16, sf: i16) -> Option<f32> {
-    if val == -32768 {
+    if val == SUNSPEC_UNIMPLEMENTED_I16 {
         return None;
     }
     Some(val as f32 * 10f32.powi(sf as i32))
 }
 
 fn apply_sf_u32(val: u32, sf: i16) -> Option<f32> {
-    if val == 0xFFFFFFFF {
+    if val == SUNSPEC_UNIMPLEMENTED_U32 {
         return None;
     }
     Some(val as f32 * 10f32.powi(sf as i32))
@@ -506,14 +510,14 @@ mod tests {
         assert_near_opt(apply_sf(100, 0), Some(100.0));
         assert_near_opt(apply_sf(100, -1), Some(10.0));
         assert_near_opt(apply_sf(100, 1), Some(1000.0));
-        assert_eq!(apply_sf(0xFFFF, -1), None);
+        assert_eq!(apply_sf(SUNSPEC_UNIMPLEMENTED_U16, -1), None);
     }
 
     #[test]
     fn test_apply_sf_i16() {
         assert_near_opt(apply_sf_i16(100, 0), Some(100.0));
         assert_near_opt(apply_sf_i16(-100, -1), Some(-10.0));
-        assert_eq!(apply_sf_i16(-32768, -1), None);
+        assert_eq!(apply_sf_i16(SUNSPEC_UNIMPLEMENTED_I16, -1), None);
     }
 
     #[test]
@@ -523,22 +527,22 @@ mod tests {
         assert_eq!(apply_sf_i16_opt(None, Some(-1)), None);
         assert_eq!(apply_sf_i16_opt(Some(100), None), None);
         assert_eq!(apply_sf_i16_opt(None, None), None);
-        assert_eq!(apply_sf_i16_opt(Some(-32768), Some(-1)), None);
+        assert_eq!(apply_sf_i16_opt(Some(SUNSPEC_UNIMPLEMENTED_I16), Some(-1)), None);
     }
 
     #[test]
     fn test_apply_sf_u32() {
         assert_near_opt(apply_sf_u32(100000, 0), Some(100000.0));
         assert_near(apply_sf_u32(123456, -2).unwrap(), 1234.56);
-        assert_eq!(apply_sf_u32(0xFFFFFFFF, -2), None);
+        assert_eq!(apply_sf_u32(SUNSPEC_UNIMPLEMENTED_U32, -2), None);
     }
 
     #[test]
     fn test_not_implemented_values() {
         let mut m101 = empty_m101();
-        m101.ph_vph_a = 0xFFFF; // Not implemented
-        m101.w = -32768; // Not implemented
-        m101.va = Some(-32768); // Not implemented
+        m101.ph_vph_a = SUNSPEC_UNIMPLEMENTED_U16; // Not implemented
+        m101.w = SUNSPEC_UNIMPLEMENTED_I16; // Not implemented
+        m101.va = Some(SUNSPEC_UNIMPLEMENTED_I16); // Not implemented
 
         let data = InverterData::from(m101);
         assert_eq!(data.v_an, None);
