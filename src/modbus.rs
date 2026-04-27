@@ -124,7 +124,10 @@ impl ConnectionTask {
             .await;
 
             if let Err(e) = result {
-                error!("Error: {}. Reconnecting in {}s...", e, RECONNECT_TIMEOUT_SECS);
+                error!(
+                    "Error: {}. Reconnecting in {}s...",
+                    e, RECONNECT_TIMEOUT_SECS
+                );
                 tokio::select! {
                     biased;
                     _ = self.token.cancelled() => break,
@@ -788,6 +791,8 @@ struct DiscoveryContext<'a> {
 }
 
 #[cfg(test)]
+mod modbus_test_utils;
+#[cfg(test)]
 mod tests {
     use super::*;
     use tokio::sync::mpsc;
@@ -878,5 +883,231 @@ mod tests {
         assert!(!payload.contains("\"sw_version\""));
         assert!(!payload.contains("\"unit_of_measurement\""));
         assert!(!payload.contains("\"state_class\""));
+    }
+
+    #[tokio::test]
+    async fn test_reconnection_logic() {
+        // Use tokio::time::pause() to advance time and skip the "real" timeout
+        tokio::time::pause();
+
+        let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let handle_mock = modbus_test_utils::start_mock_server(addr).await;
+        let addr_str = handle_mock.addr.to_string();
+
+        let (tx, _rx) = mpsc::channel(1);
+        let token = CancellationToken::new();
+        let root_cert_store = Arc::new(rustls::RootCertStore::empty());
+
+        let task = ConnectionTask {
+            config: ConnectionConfig {
+                name: "test".to_string(),
+                modbus: ModbusConfig::Tcp {
+                    address: addr_str,
+                    tls: false,
+                },
+                devices: vec![DeviceConfig {
+                    unit_id: 1,
+                    interval: 10,
+                }],
+                keep_alive_interval: None,
+            },
+            mqtt_tx: tx,
+            topic_prefix: "solar".to_string(),
+            ha_prefix: "homeassistant".to_string(),
+            token: token.clone(),
+            root_cert_store,
+        };
+
+        let token_clone = token.clone();
+        let task_handle = tokio::spawn(async move { task.run_internal().await });
+
+        // Let it attempt multiple times.
+        // It fails because it lacks SunS marker, so it will reconnect.
+        for i in 1..=3 {
+            tokio::time::advance(Duration::from_secs(RECONNECT_TIMEOUT_SECS + 1)).await;
+            // Wait for the mock server to signal a connection
+            handle_mock.notify.notified().await;
+            assert!(
+                handle_mock
+                    .connections
+                    .load(std::sync::atomic::Ordering::SeqCst)
+                    >= i
+            );
+        }
+
+        token_clone.cancel();
+        let result = task_handle.await.unwrap();
+        assert!(result.is_ok()); // run_internal returns Ok(()) on cancellation
+    }
+
+    #[tokio::test]
+    async fn test_successful_poll_logic() {
+        tokio::time::pause();
+        let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let handle_mock = modbus_test_utils::start_mock_server(addr).await;
+        let addr_str = handle_mock.addr.to_string();
+        let regs = handle_mock.registers;
+
+        // Setup SunSpec discovery registers
+        {
+            let mut r = regs.lock().unwrap();
+            r[40000] = 0x5375; // 'Su'
+            r[40001] = 0x6e53; // 'nS'
+
+            // Model 1 (Common)
+            r[40002] = 1; // Model ID
+            r[40003] = 66; // Length
+            // Pre-fill with spaces
+            for i in 0..66 {
+                r[40004 + i] = 0x2020;
+            }
+            // Manufacturer (Mn) starts at offset 0 of Model 1 data (r[40004])
+            r[40004] = 0x4272; // 'Br'
+            r[40005] = 0x616e; // 'an'
+            r[40006] = 0x6420; // 'd '
+            // Model (Md) starts at offset 16 of Model 1 data (r[40004+16=40020])
+            r[40020] = 0x4d6f; // 'Mo'
+            r[40021] = 0x6465; // 'de'
+            r[40022] = 0x6c20; // 'l '
+            // Serial number (SN) starts at offset 50 (40004 + 50 = 40054)
+            r[40054] = 0x534e; // 'SN'
+            r[40055] = 0x3132; // '12'
+            r[40056] = 0x3334; // '34'
+
+            // Model 103 (Three Phase Inverter) at 40070 (40002 + 66 + 2)
+            r[40070] = 103; // Model ID
+            r[40071] = 50; // Length
+            let base = 40072;
+
+            // W at offset 12, W_SF at offset 13
+            r[base + 12] = 1000;
+            r[base + 13] = 0; // SF = 0
+
+            // St at offset 36
+            r[base + 36] = 1; // OFF
+
+            // End of models marker
+            r[base + 50] = 0xFFFF;
+            r[base + 51] = 0;
+        }
+
+        let (tx, mut rx) = mpsc::channel(100);
+        let token = CancellationToken::new();
+        let root_cert_store = Arc::new(rustls::RootCertStore::empty());
+
+        let task = ConnectionTask {
+            config: ConnectionConfig {
+                name: "test".to_string(),
+                modbus: ModbusConfig::Tcp {
+                    address: addr_str,
+                    tls: false,
+                },
+                devices: vec![DeviceConfig {
+                    unit_id: 1,
+                    interval: 1,
+                }], // Short interval
+                keep_alive_interval: None,
+            },
+            mqtt_tx: tx,
+            topic_prefix: "solar".to_string(),
+            ha_prefix: "homeassistant".to_string(),
+            token: token.clone(),
+            root_cert_store,
+        };
+
+        let token_clone = token.clone();
+        let task_handle = tokio::spawn(async move { task.run_internal().await });
+
+        // Collect messages
+        let mut messages = Vec::new();
+
+        // Wait for all 12 discovery messages
+        for _ in 0..12 {
+            if let Some(msg) = rx.recv().await {
+                messages.push(msg);
+            } else {
+                panic!("Channel closed early (got {})", messages.len());
+            }
+        }
+
+        // Trigger polling by advancing time.
+        // The background task will wake up and perform polling.
+        tokio::time::advance(Duration::from_secs(2)).await;
+
+        // Collect more messages (Data + Status)
+        // We expect exactly 2 more messages for a successful poll
+        for _ in 0..2 {
+            if let Some(msg) = rx.recv().await {
+                messages.push(msg);
+            } else {
+                panic!("Channel closed early during polling");
+            }
+        }
+
+        assert!(!messages.is_empty(), "Should have received MQTT messages");
+
+        // We expect discovery messages (12) + poll (Data + Status)
+        // Discovery messages have topics starting with homeassistant/
+        let discovery_msgs: Vec<_> = messages
+            .iter()
+            .filter(|m| {
+                let MqttMessage::Publish { topic, .. } = m;
+                topic.starts_with("homeassistant/")
+            })
+            .collect();
+        assert!(
+            discovery_msgs.len() >= 12,
+            "Should have several discovery messages"
+        );
+
+        // Verify one specific discovery message (e.g., Power sensor 'W')
+        let w_discovery = discovery_msgs
+            .iter()
+            .find(|m| {
+                let MqttMessage::Publish { topic, .. } = m;
+                topic.contains("/W/")
+            })
+            .expect("Should have discovery for 'W'");
+
+        let MqttMessage::Publish { topic, payload, .. } = w_discovery;
+        assert_eq!(*topic, "homeassistant/sensor/SN1234/W/config");
+        assert!(payload.contains("\"manufacturer\":\"Brand\""));
+        assert!(payload.contains("\"model\":\"Model\""));
+        assert!(payload.contains("\"unique_id\":\"solar_SN1234_W\""));
+
+        // Check for data messages
+        let data_msgs: Vec<_> = messages
+            .iter()
+            .filter(|m| {
+                let MqttMessage::Publish { topic, .. } = m;
+                topic == "solar/inverter/SN1234"
+            })
+            .collect();
+        assert!(!data_msgs.is_empty(), "Should have received poll data");
+
+        let MqttMessage::Publish { payload, .. } = &data_msgs[0];
+        let json: serde_json::Value = serde_json::from_str(payload).unwrap();
+        assert_eq!(json["W"], 1000.0);
+        assert_eq!(json["St"], "OFF");
+
+        // Check for status messages
+        let status_msgs: Vec<_> = messages
+            .iter()
+            .filter(|m| {
+                let MqttMessage::Publish { topic, .. } = m;
+                topic == "solar/inverter/SN1234/status"
+            })
+            .collect();
+        assert!(
+            !status_msgs.is_empty(),
+            "Should have received status updates"
+        );
+
+        let MqttMessage::Publish { payload, .. } = &status_msgs[0];
+        let json: serde_json::Value = serde_json::from_str(payload).unwrap();
+        assert_eq!(json["status"], "OK");
+
+        token_clone.cancel();
+        let _ = task_handle.await.unwrap();
     }
 }

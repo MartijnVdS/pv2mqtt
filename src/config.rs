@@ -196,7 +196,10 @@ impl Config {
                 }
             }
 
-            if conn.keep_alive_interval.is_some_and(|ka| ka > MAX_KEEPALIVE_SECS) {
+            if conn
+                .keep_alive_interval
+                .is_some_and(|ka| ka > MAX_KEEPALIVE_SECS)
+            {
                 let ka = conn.keep_alive_interval.unwrap();
                 return Err(Pv2MqttError::Config(format!(
                     "Keep-alive interval {} is too large in connection '{}' (max {}s)",
@@ -525,5 +528,97 @@ mod tests {
         } else {
             panic!("Expected RTU config");
         }
+    }
+
+    #[test]
+    fn test_config_load_success() {
+        let temp_dir = std::env::temp_dir();
+        let config_path = temp_dir.join("pv2mqtt_test_valid.toml");
+        let content = r#"
+            [mqtt]
+            url = "mqtt://localhost:1883"
+            client_id = "pv2mqtt_test"
+            topic_prefix = "solar"
+            ha_prefix = "homeassistant"
+
+            [[connections]]
+            name = "inverter1"
+            keep_alive_interval = 30
+            [connections.modbus]
+            type = "tcp"
+            address = "127.0.0.1:502"
+            tls = false
+            [[connections.devices]]
+            unit_id = 1
+            interval = 10
+        "#;
+        fs::write(&config_path, content).unwrap();
+
+        let result = Config::load(&config_path);
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.mqtt.client_id, "pv2mqtt_test");
+        assert_eq!(config.connections.len(), 1);
+        assert_eq!(config.connections[0].name, "inverter1");
+
+        let _ = fs::remove_file(config_path);
+    }
+
+    #[test]
+    fn test_config_load_file_not_found() {
+        let result = Config::load("non_existent_config_file.toml");
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            Pv2MqttError::Config(msg) => assert!(msg.contains("Failed to read config file")),
+            e => panic!("Expected Config error, got {:?}", e),
+        }
+    }
+
+    #[test]
+    fn test_config_load_invalid_toml() {
+        let temp_dir = std::env::temp_dir();
+        let config_path = temp_dir.join("pv2mqtt_test_invalid.toml");
+        let content = "this is not TOML";
+        fs::write(&config_path, content).unwrap();
+
+        let result = Config::load(&config_path);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            Pv2MqttError::Config(msg) => assert!(msg.contains("Failed to parse config TOML")),
+            e => panic!("Expected Config error, got {:?}", e),
+        }
+
+        let _ = fs::remove_file(config_path);
+    }
+
+    #[test]
+    fn test_config_load_validation_failure() {
+        let temp_dir = std::env::temp_dir();
+        let config_path = temp_dir.join("pv2mqtt_test_validation_fail.toml");
+        let content = r#"
+            [mqtt]
+            url = "mqtt://localhost:1883"
+            client_id = "test"
+            topic_prefix = "solar/" # Invalid trailing slash
+            ha_prefix = "homeassistant"
+
+            [[connections]]
+            name = "test"
+            [connections.modbus]
+            type = "tcp"
+            address = "127.0.0.1:502"
+            [[connections.devices]]
+            unit_id = 1
+        "#;
+        fs::write(&config_path, content).unwrap();
+
+        let result = Config::load(&config_path);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            Pv2MqttError::Config(msg) => assert!(msg.contains("cannot end with a slash")),
+            e => panic!("Expected Config error, got {:?}", e),
+        }
+
+        let _ = fs::remove_file(config_path);
     }
 }
