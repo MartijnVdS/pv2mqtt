@@ -210,23 +210,7 @@ impl_float_model!(Model113);
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn assert_near(actual: f32, expected: f32) {
-        assert!(
-            (actual - expected).abs() < 0.001,
-            "actual: {}, expected: {}",
-            actual,
-            expected
-        );
-    }
-
-    fn assert_near_opt(actual: Option<f32>, expected: Option<f32>) {
-        match (actual, expected) {
-            (Some(a), Some(e)) => assert_near(a, e),
-            (None, None) => {}
-            _ => panic!("actual: {:?}, expected: {:?}", actual, expected),
-        }
-    }
+    use approx::assert_relative_eq;
 
     use sunspec::models::model101::{
         Evt1 as Evt1_101, Evt2 as Evt2_101, EvtVnd1 as EvtVnd1_101, EvtVnd2 as EvtVnd2_101,
@@ -507,23 +491,23 @@ mod tests {
 
     #[test]
     fn test_apply_sf() {
-        assert_near_opt(apply_sf(100, 0), Some(100.0));
-        assert_near_opt(apply_sf(100, -1), Some(10.0));
-        assert_near_opt(apply_sf(100, 1), Some(1000.0));
+        assert_relative_eq!(apply_sf(100, 0).unwrap(), 100.0);
+        assert_relative_eq!(apply_sf(100, -1).unwrap(), 10.0);
+        assert_relative_eq!(apply_sf(100, 1).unwrap(), 1000.0);
         assert_eq!(apply_sf(SUNSPEC_UNIMPLEMENTED_U16, -1), None);
     }
 
     #[test]
     fn test_apply_sf_i16() {
-        assert_near_opt(apply_sf_i16(100, 0), Some(100.0));
-        assert_near_opt(apply_sf_i16(-100, -1), Some(-10.0));
+        assert_relative_eq!(apply_sf_i16(100, 0).unwrap(), 100.0);
+        assert_relative_eq!(apply_sf_i16(-100, -1).unwrap(), -10.0);
         assert_eq!(apply_sf_i16(SUNSPEC_UNIMPLEMENTED_I16, -1), None);
     }
 
     #[test]
     fn test_apply_sf_i16_opt() {
-        assert_near_opt(apply_sf_i16_opt(Some(100), Some(0)), Some(100.0));
-        assert_near_opt(apply_sf_i16_opt(Some(100), Some(-1)), Some(10.0));
+        assert_relative_eq!(apply_sf_i16_opt(Some(100), Some(0)).unwrap(), 100.0);
+        assert_relative_eq!(apply_sf_i16_opt(Some(100), Some(-1)).unwrap(), 10.0);
         assert_eq!(apply_sf_i16_opt(None, Some(-1)), None);
         assert_eq!(apply_sf_i16_opt(Some(100), None), None);
         assert_eq!(apply_sf_i16_opt(None, None), None);
@@ -535,8 +519,8 @@ mod tests {
 
     #[test]
     fn test_apply_sf_u32() {
-        assert_near_opt(apply_sf_u32(100000, 0), Some(100000.0));
-        assert_near(apply_sf_u32(123456, -2).unwrap(), 1234.56);
+        assert_relative_eq!(apply_sf_u32(100000, 0).unwrap(), 100000.0);
+        assert_relative_eq!(apply_sf_u32(123456, -2).unwrap(), 1234.56);
         assert_eq!(apply_sf_u32(SUNSPEC_UNIMPLEMENTED_U32, -2), None);
     }
 
@@ -549,7 +533,7 @@ mod tests {
 
         let data = InverterData::from(m101);
         assert_eq!(data.v_an, None);
-        assert_near(data.w, 0.0);
+        assert_relative_eq!(data.w, 0.0);
         assert_eq!(data.va, None);
     }
 
@@ -571,12 +555,12 @@ mod tests {
         m101.tmp_sf = -1;
 
         let data = InverterData::from(m101);
-        assert_near_opt(data.v_an, Some(230.0));
-        assert_near(data.w, 23000.0);
-        assert_near(data.hz, 50.0);
-        assert_near(data.wh, 1234.56);
+        assert_relative_eq!(data.v_an.unwrap(), 230.0);
+        assert_relative_eq!(data.w, 23000.0);
+        assert_relative_eq!(data.hz, 50.0);
+        assert_relative_eq!(data.wh, 1234.56);
         assert_eq!(data.st, "MPPT");
-        assert_near_opt(data.tmp_cab, Some(45.0));
+        assert_relative_eq!(data.tmp_cab.unwrap(), 45.0);
     }
 
     #[test]
@@ -591,8 +575,8 @@ mod tests {
         m102.st = St102::Mppt;
 
         let data = InverterData::from(m102);
-        assert_near_opt(data.v_an, Some(230.0));
-        assert_near(data.w, 10000.0);
+        assert_relative_eq!(data.v_an.unwrap(), 230.0);
+        assert_relative_eq!(data.w, 10000.0);
         assert_eq!(data.st, "MPPT");
     }
 
@@ -608,8 +592,8 @@ mod tests {
         m103.st = St103::Mppt;
 
         let data = InverterData::from(m103);
-        assert_near_opt(data.v_an, Some(230.0));
-        assert_near(data.w, 12000.0);
+        assert_relative_eq!(data.v_an.unwrap(), 230.0);
+        assert_relative_eq!(data.w, 12000.0);
         assert_eq!(data.st, "MPPT");
     }
 
@@ -622,8 +606,8 @@ mod tests {
         m111.st = St111::GgMppt;
 
         let data = InverterData::from(m111);
-        assert_near(data.w, 2300.0);
-        assert_near(data.hz, 50.0);
+        assert_relative_eq!(data.w, 2300.0);
+        assert_relative_eq!(data.hz, 50.0);
         assert_eq!(data.st, "MPPT");
     }
 
@@ -635,7 +619,7 @@ mod tests {
         m112.st = St112::Mppt;
 
         let data = InverterData::from(m112);
-        assert_near(data.w, 8000.0);
+        assert_relative_eq!(data.w, 8000.0);
         assert_eq!(data.st, "MPPT");
     }
 
@@ -647,7 +631,7 @@ mod tests {
         m113.st = St113::Mppt;
 
         let data = InverterData::from(m113);
-        assert_near(data.w, 12000.0);
+        assert_relative_eq!(data.w, 12000.0);
         assert_eq!(data.st, "MPPT");
     }
 

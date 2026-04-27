@@ -44,3 +44,6 @@ thiserror = "2.0.18"
 [profile.release]
 lto = true
 codegen-units = 1
+
+[dev-dependencies]
+approx = "0.5.1"
