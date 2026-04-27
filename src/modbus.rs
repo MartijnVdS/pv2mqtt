@@ -117,8 +117,7 @@ impl ConnectionTask {
             let result: Result<()> = async {
                 let ctx = self.establish_connection().await?;
                 info!("Connected");
-                self.initialize_devices(ctx, &mut devices).await?;
-                self.run_polling_loop(&mut devices).await?;
+                self.run_polling_loop(ctx, &mut devices).await?;
                 Ok(())
             }
             .await;
@@ -141,7 +140,7 @@ impl ConnectionTask {
         Ok(())
     }
 
-    async fn initialize_devices(
+    async fn run_polling_loop(
         &self,
         ctx: ModbusContext,
         devices: &mut [DeviceState],
@@ -156,184 +155,6 @@ impl ConnectionTask {
             },
         );
 
-        // Initial discovery and Model 1 poll
-        for device_state in devices.iter_mut() {
-            if self.token.is_cancelled() {
-                return Ok(());
-            }
-
-            let unit_id = device_state.config.unit_id;
-            let res: Result<()> = async {
-                let device = client
-                    .device(unit_id)
-                    .await
-                    .map_err(|e| Pv2MqttError::DeviceDiscovery(unit_id, e.to_string()))?;
-
-                // Find supported inverter model
-                let available_models = device.models.supported_model_ids();
-                device_state.supported_model = SUPPORTED_MODELS
-                    .iter()
-                    .find(|&&id| available_models.contains(&id))
-                    .copied();
-
-                if device_state.supported_model.is_none() {
-                    let available = available_models
-                        .iter()
-                        .map(|id| id.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    return Err(Pv2MqttError::DeviceDiscovery(
-                        unit_id,
-                        format!("No supported inverter model found. Available: {}", available),
-                    ));
-                }
-
-                // Try to read Model 1 for metadata/serial
-                let m1_res = tokio::time::timeout(Duration::from_secs(POLL_TIMEOUT_SECS), device.read_model::<Model1>())
-                    .instrument(info_span!("model1_read", unit_id))
-                    .await;
-
-                match m1_res {
-                    Ok(Ok(m1)) => {
-                        let serial = m1.sn.trim().to_string();
-                        let manufacturer = m1.mn.trim().to_string();
-                        let model = m1.md.trim().to_string();
-                        let version_opt = m1
-                            .vr
-                            .as_ref()
-                            .map(|v| v.trim().to_string())
-                            .filter(|v| !v.is_empty());
-
-                        if serial.is_empty() {
-                            warn!("Device {} returned an empty serial number, skipping discovery", unit_id);
-                            return Ok(());
-                        }
-
-                        // Only log and publish discovery if it's new or changed
-                        if device_state.serial.as_ref() != Some(&serial) {
-                            info!("Discovered device: {} {} (Serial: {})", manufacturer, model, serial);
-                            device_state.serial = Some(serial.clone());
-                            device_state.manufacturer = Some(manufacturer.clone());
-                            device_state.model = Some(model.clone());
-                            device_state.version = version_opt.clone();
-                            self.publish_discovery(
-                                &serial,
-                                &manufacturer,
-                                &model,
-                                version_opt.as_deref(),
-                                device_state.supported_model,
-                            )
-                            .await?;
-                        } else {
-                            info!("Refreshed connection to device (Serial: {})", serial);
-                        }
-                    }
-                    Ok(Err(e)) => {
-                        if device_state.serial.is_none() {
-                            return Err(Pv2MqttError::ModelRead(1, e.to_string()));
-                        }
-                        info!(
-                            "Failed to refresh Model 1 for device, using cached info (Serial: {:?})",
-                            device_state.serial
-                        );
-                    }
-                    Err(_) => {
-                        return Err(Pv2MqttError::ModbusTimeout(format!(
-                            "Timeout reading Model 1 from device {}",
-                            unit_id
-                        )));
-                    }
-                }
-
-                // Store the device for later use
-                device_state.device = Some(device);
-                Ok(())
-            }
-            .await;
-
-            if let Err(e) = res {
-                error!("Failed to initialize device {}: {}", unit_id, e);
-                return Err(e);
-            }
-        }
-        Ok(())
-    }
-
-    async fn establish_connection(&self) -> Result<ModbusContext> {
-        match &self.config.modbus {
-            ModbusConfig::Tcp { address, tls } => {
-                info!("Connecting to Modbus TCP at {} (TLS: {})", address, tls);
-                let stream = tokio::time::timeout(
-                    Duration::from_secs(CONNECT_TIMEOUT_SECS),
-                    tokio::net::TcpStream::connect(address),
-                )
-                .await
-                .map_err(|_| {
-                    Pv2MqttError::ModbusTcpConnection(format!("Timeout connecting to {}", address))
-                })?
-                .map_err(|e| {
-                    Pv2MqttError::ModbusTcpConnection(format!(
-                        "Failed to connect to {}: {}",
-                        address, e
-                    ))
-                })?;
-
-                if *tls {
-                    let config = ClientConfig::builder()
-                        .with_root_certificates(Arc::clone(&self.root_cert_store))
-                        .with_no_client_auth();
-                    let connector = TlsConnector::from(Arc::new(config));
-
-                    let host = address.split(':').next().ok_or_else(|| {
-                        Pv2MqttError::ModbusTcpConnection("Invalid address".to_string())
-                    })?;
-                    let server_name = ServerName::try_from(host)
-                        .map_err(|e| {
-                            Pv2MqttError::ModbusTcpConnection(format!("invalid server name: {}", e))
-                        })?
-                        .to_owned();
-
-                    let tls_stream = tokio::time::timeout(
-                        Duration::from_secs(CONNECT_TIMEOUT_SECS),
-                        connector.connect(server_name, stream),
-                    )
-                    .await
-                    .map_err(|_| {
-                        Pv2MqttError::ModbusTcpConnection(format!(
-                            "Timeout during TLS handshake with {}",
-                            address
-                        ))
-                    })?
-                    .map_err(|e| {
-                        Pv2MqttError::ModbusTcpConnection(format!("TLS handshake failed: {}", e))
-                    })?;
-                    Ok(tcp::attach(tls_stream))
-                } else {
-                    Ok(tcp::attach(stream))
-                }
-            }
-            ModbusConfig::Rtu {
-                device,
-                baud_rate,
-                parity,
-            } => {
-                info!(
-                    "Connecting to Modbus RTU at {} ({} baud, parity: {:?})",
-                    device, baud_rate, parity
-                );
-                let builder = tokio_serial::new(device, *baud_rate).parity(match parity {
-                    Parity::None => tokio_serial::Parity::None,
-                    Parity::Even => tokio_serial::Parity::Even,
-                    Parity::Odd => tokio_serial::Parity::Odd,
-                });
-
-                let port = SerialStream::open(&builder)?;
-                Ok(rtu::attach_slave(port, Slave(0)))
-            }
-        }
-    }
-
-    async fn run_polling_loop(&self, devices: &mut [DeviceState]) -> Result<()> {
         let mut last_activity = Instant::now();
         let keep_alive_interval = self.config.keep_alive_interval.unwrap_or(30);
         let keep_alive_duration = Duration::from_secs(keep_alive_interval);
@@ -432,9 +253,232 @@ impl ConnectionTask {
                     .unwrap_or(now);
 
                 if next_poll <= now {
-                    self.perform_device_poll(device_state, now).await?;
+                    // Update last_poll before starting to ensure we don't immediately retry on timeout reconnect
+                    device_state.last_poll = Some(now);
+
+                    let res = if device_state.device.is_none() {
+                        match self.discover_device(&client, device_state).await {
+                            Ok(_) => {
+                                // Successfully discovered, perform initial poll immediately
+                                self.perform_device_poll(device_state, now).await
+                            }
+                            Err(e) => Err(e),
+                        }
+                    } else {
+                        self.perform_device_poll(device_state, now).await
+                    };
+
+                    if let Err(e) = res {
+                        if matches!(e, Pv2MqttError::ModbusTimeout(_)) {
+                            return Err(e);
+                        }
+                        // Non-timeout errors are logged but don't break the connection
+                        error!(
+                            "Error processing device {}: {}",
+                            device_state.config.unit_id, e
+                        );
+                    }
+
                     last_activity = Instant::now();
                 }
+            }
+        }
+    }
+
+    async fn discover_device(
+        &self,
+        client: &AsyncClient<Arc<Mutex<ModbusContext>>>,
+        device_state: &mut DeviceState,
+    ) -> Result<()> {
+        let unit_id = device_state.config.unit_id;
+        let span = info_span!("discovery", unit_id);
+
+        async {
+            let device_res = tokio::time::timeout(
+                Duration::from_secs(POLL_TIMEOUT_SECS),
+                client.device(unit_id),
+            )
+            .await;
+
+            let device = match device_res {
+                Ok(Ok(d)) => d,
+                Ok(Err(e)) => {
+                    return Err(Pv2MqttError::DeviceDiscovery(unit_id, e.to_string()));
+                }
+                Err(_) => {
+                    return Err(Pv2MqttError::ModbusTimeout(format!(
+                        "Timeout discovering device {}",
+                        unit_id
+                    )));
+                }
+            };
+
+            // Find supported inverter model
+            let available_models = device.models.supported_model_ids();
+            device_state.supported_model = SUPPORTED_MODELS
+                .iter()
+                .find(|&&id| available_models.contains(&id))
+                .copied();
+
+            if device_state.supported_model.is_none() {
+                let available = available_models
+                    .iter()
+                    .map(|id| id.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Err(Pv2MqttError::DeviceDiscovery(
+                    unit_id,
+                    format!(
+                        "No supported inverter model found. Available: {}",
+                        available
+                    ),
+                ));
+            }
+
+            // Try to read Model 1 for metadata/serial
+            let m1_res = tokio::time::timeout(
+                Duration::from_secs(POLL_TIMEOUT_SECS),
+                device.read_model::<Model1>(),
+            )
+            .instrument(info_span!("model1_read", unit_id))
+            .await;
+
+            match m1_res {
+                Ok(Ok(m1)) => {
+                    let serial = m1.sn.trim().to_string();
+                    let manufacturer = m1.mn.trim().to_string();
+                    let model = m1.md.trim().to_string();
+                    let version_opt = m1
+                        .vr
+                        .as_ref()
+                        .map(|v| v.trim().to_string())
+                        .filter(|v| !v.is_empty());
+
+                    if serial.is_empty() {
+                        warn!(
+                            "Device {} returned an empty serial number, skipping discovery",
+                            unit_id
+                        );
+                        return Ok(());
+                    }
+
+                    // Only log and publish discovery if it's new or changed
+                    if device_state.serial.as_ref() != Some(&serial) {
+                        info!(
+                            "Discovered device: {} {} (Serial: {})",
+                            manufacturer, model, serial
+                        );
+                        device_state.serial = Some(serial.clone());
+                        device_state.manufacturer = Some(manufacturer.clone());
+                        device_state.model = Some(model.clone());
+                        device_state.version = version_opt.clone();
+                        self.publish_discovery(
+                            &serial,
+                            &manufacturer,
+                            &model,
+                            version_opt.as_deref(),
+                            device_state.supported_model,
+                        )
+                        .await?;
+                    } else {
+                        info!("Refreshed connection to device (Serial: {})", serial);
+                    }
+                }
+                Ok(Err(e)) => {
+                    if device_state.serial.is_none() {
+                        return Err(Pv2MqttError::ModelRead(1, e.to_string()));
+                    }
+                    info!(
+                        "Failed to refresh Model 1 for device, using cached info (Serial: {:?})",
+                        device_state.serial
+                    );
+                }
+                Err(_) => {
+                    return Err(Pv2MqttError::ModbusTimeout(format!(
+                        "Timeout reading Model 1 from device {}",
+                        unit_id
+                    )));
+                }
+            }
+
+            // Store the device for later use
+            device_state.device = Some(device);
+            Ok(())
+        }
+        .instrument(span)
+        .await
+    }
+
+    async fn establish_connection(&self) -> Result<ModbusContext> {
+        match &self.config.modbus {
+            ModbusConfig::Tcp { address, tls } => {
+                info!("Connecting to Modbus TCP at {} (TLS: {})", address, tls);
+                let stream = tokio::time::timeout(
+                    Duration::from_secs(CONNECT_TIMEOUT_SECS),
+                    tokio::net::TcpStream::connect(address),
+                )
+                .await
+                .map_err(|_| {
+                    Pv2MqttError::ModbusTcpConnection(format!("Timeout connecting to {}", address))
+                })?
+                .map_err(|e| {
+                    Pv2MqttError::ModbusTcpConnection(format!(
+                        "Failed to connect to {}: {}",
+                        address, e
+                    ))
+                })?;
+
+                if *tls {
+                    let config = ClientConfig::builder()
+                        .with_root_certificates(Arc::clone(&self.root_cert_store))
+                        .with_no_client_auth();
+                    let connector = TlsConnector::from(Arc::new(config));
+
+                    let host = address.split(':').next().ok_or_else(|| {
+                        Pv2MqttError::ModbusTcpConnection("Invalid address".to_string())
+                    })?;
+                    let server_name = ServerName::try_from(host)
+                        .map_err(|e| {
+                            Pv2MqttError::ModbusTcpConnection(format!("invalid server name: {}", e))
+                        })?
+                        .to_owned();
+
+                    let tls_stream = tokio::time::timeout(
+                        Duration::from_secs(CONNECT_TIMEOUT_SECS),
+                        connector.connect(server_name, stream),
+                    )
+                    .await
+                    .map_err(|_| {
+                        Pv2MqttError::ModbusTcpConnection(format!(
+                            "Timeout during TLS handshake with {}",
+                            address
+                        ))
+                    })?
+                    .map_err(|e| {
+                        Pv2MqttError::ModbusTcpConnection(format!("TLS handshake failed: {}", e))
+                    })?;
+                    Ok(tcp::attach(tls_stream))
+                } else {
+                    Ok(tcp::attach(stream))
+                }
+            }
+            ModbusConfig::Rtu {
+                device,
+                baud_rate,
+                parity,
+            } => {
+                info!(
+                    "Connecting to Modbus RTU at {} ({} baud, parity: {:?})",
+                    device, baud_rate, parity
+                );
+                let builder = tokio_serial::new(device, *baud_rate).parity(match parity {
+                    Parity::None => tokio_serial::Parity::None,
+                    Parity::Even => tokio_serial::Parity::Even,
+                    Parity::Odd => tokio_serial::Parity::Odd,
+                });
+
+                let port = SerialStream::open(&builder)?;
+                Ok(rtu::attach_slave(port, Slave(0)))
             }
         }
     }
@@ -797,6 +841,7 @@ mod modbus_test_utils;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::Ordering;
     use tokio::sync::mpsc;
 
     fn test_task() -> ConnectionTask {
@@ -923,19 +968,16 @@ mod tests {
         let token_clone = token.clone();
         let task_handle = tokio::spawn(async move { task.run_internal().await });
 
-        // Let it attempt multiple times.
-        // It fails because it lacks SunS marker, so it will reconnect.
-        for i in 1..=3 {
-            tokio::time::advance(Duration::from_secs(RECONNECT_TIMEOUT_SECS + 1)).await;
-            // Wait for the mock server to signal a connection
-            handle_mock.notify.notified().await;
-            assert!(
-                handle_mock
-                    .connections
-                    .load(std::sync::atomic::Ordering::SeqCst)
-                    >= i
-            );
-        }
+        // Wait for the first connection
+        handle_mock.notify.notified().await;
+        assert_eq!(handle_mock.connections.load(Ordering::SeqCst), 1);
+
+        // Advance time. Discovery will fail (no SunSpec marker), but it should NOT reconnect.
+        tokio::time::advance(Duration::from_secs(1)).await;
+
+        // Wait some time and check that connections is still 1
+        tokio::time::advance(Duration::from_secs(RECONNECT_TIMEOUT_SECS * 2)).await;
+        assert_eq!(handle_mock.connections.load(Ordering::SeqCst), 1);
 
         token_clone.cancel();
         let result = task_handle.await.unwrap();
@@ -944,7 +986,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_successful_poll_logic() {
-        tokio::time::pause();
         let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
         let handle_mock = modbus_test_utils::start_mock_server(addr).await;
         let addr_str = handle_mock.addr.to_string();
@@ -1020,29 +1061,28 @@ mod tests {
         let token_clone = token.clone();
         let task_handle = tokio::spawn(async move { task.run_internal().await });
 
+        // Wait for the mock server to signal a connection
+        handle_mock.notify.notified().await;
+
         // Collect messages
         let mut messages = Vec::new();
 
-        // Wait for all 12 discovery messages
+        // Wait for all 12 discovery messages with a generous timeout per message
         for _ in 0..12 {
-            if let Some(msg) = rx.recv().await {
-                messages.push(msg);
-            } else {
-                panic!("Channel closed early (got {})", messages.len());
+            match tokio::time::timeout(Duration::from_secs(5), rx.recv()).await {
+                Ok(Some(msg)) => messages.push(msg),
+                Ok(None) => panic!("Channel closed early (got {})", messages.len()),
+                Err(_) => panic!("Timeout waiting for discovery message {}", messages.len()),
             }
         }
 
-        // Trigger polling by advancing time.
-        // The background task will wake up and perform polling.
-        tokio::time::advance(Duration::from_secs(2)).await;
-
-        // Collect more messages (Data + Status)
-        // We expect exactly 2 more messages for a successful poll
+        // Wait for next poll (Data + Status)
+        // This will naturally wait for the 1s interval to pass in the background task
         for _ in 0..2 {
-            if let Some(msg) = rx.recv().await {
-                messages.push(msg);
-            } else {
-                panic!("Channel closed early during polling");
+            match tokio::time::timeout(Duration::from_secs(5), rx.recv()).await {
+                Ok(Some(msg)) => messages.push(msg),
+                Ok(None) => panic!("Channel closed early during polling"),
+                Err(_) => panic!("Timeout waiting for poll message"),
             }
         }
 
