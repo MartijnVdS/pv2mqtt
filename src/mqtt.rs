@@ -2,7 +2,7 @@
 
 use crate::config::MqttConfig;
 use crate::error::{Pv2MqttError, Result};
-use rumqttc::{AsyncClient, Event, Incoming, MqttOptions, QoS, TlsConfiguration, Transport};
+use rumqttc::{AsyncClient, Event, Incoming, EventLoop, MqttOptions, QoS, TlsConfiguration, Transport};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -21,6 +21,23 @@ pub struct MqttTask {
     config: MqttConfig,
     rx: mpsc::Receiver<MqttMessage>,
     root_cert_store: Arc<rustls::RootCertStore>,
+}
+
+async fn run_eventloop(mut eventloop: EventLoop) -> Result<()> {
+    loop {
+        match eventloop.poll().await {
+            Ok(notification) => {
+                trace!("MQTT Notification: {:?}", notification);
+                if let Event::Incoming(Incoming::ConnAck(_)) = notification {
+                    info!("MQTT connected");
+                }
+            }
+            Err(e) => {
+                error!("MQTT error: {}", e);
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
+        }
+    }
 }
 
 impl MqttTask {
@@ -75,7 +92,7 @@ impl MqttTask {
             )));
         }
 
-        let (client, mut eventloop) = AsyncClient::new(mqttoptions, 20);
+        let (client, eventloop) = AsyncClient::new(mqttoptions, 20);
 
         info!(
             "MQTT task starting connection to {}",
@@ -84,22 +101,9 @@ impl MqttTask {
 
         let eventloop_handle = tokio::spawn(
             async move {
-                loop {
-                    match eventloop.poll().await {
-                        Ok(notification) => {
-                            trace!("MQTT Notification: {:?}", notification);
-                            if let Event::Incoming(Incoming::ConnAck(_)) = notification {
-                                info!("MQTT connected");
-                            }
-                        }
-                        Err(e) => {
-                            error!("MQTT error: {}", e);
-                            tokio::time::sleep(Duration::from_secs(5)).await;
-                        }
-                    }
-                }
+                run_eventloop(eventloop).await
             }
-            .instrument(info_span!("mqtt_eventloop")),
+            .instrument(info_span!("mqtt_eventloop"))
         );
 
         while let Some(msg) = self.rx.recv().await {
