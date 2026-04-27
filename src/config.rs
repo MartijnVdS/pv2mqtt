@@ -196,11 +196,9 @@ impl Config {
                 }
             }
 
-            if conn
-                .keep_alive_interval
-                .is_some_and(|ka| ka > MAX_KEEPALIVE_SECS)
+            if let Some(ka) = conn.keep_alive_interval
+                && ka > MAX_KEEPALIVE_SECS
             {
-                let ka = conn.keep_alive_interval.unwrap();
                 return Err(Pv2MqttError::Config(format!(
                     "Keep-alive interval {} is too large in connection '{}' (max {}s)",
                     ka, conn.name, MAX_KEEPALIVE_SECS

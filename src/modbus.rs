@@ -382,9 +382,11 @@ impl ConnectionTask {
             // Check if we need to send a keep-alive "ping"
             if keep_alive_interval > 0 && now.duration_since(last_activity) >= keep_alive_duration {
                 // Try to ping the first device that we've successfully discovered
-                if let Some(state) = devices.iter().find(|d| d.device.is_some()) {
+                if let Some((state, device)) = devices
+                    .iter()
+                    .find_map(|d| d.device.as_ref().map(|dev| (d, dev)))
+                {
                     let ping_span = info_span!("keep_alive", unit_id = state.config.unit_id);
-                    let device = state.device.as_ref().unwrap();
                     let ping_res: Result<()> = async {
                         debug!("Sending keep-alive");
 
@@ -1046,7 +1048,7 @@ mod tests {
 
         assert!(!messages.is_empty(), "Should have received MQTT messages");
 
-        // We expect discovery messages (12) + poll (Data + Status)
+        // We expect discovery messages (12) + at least one poll (Data + Status)
         // Discovery messages have topics starting with homeassistant/
         let discovery_msgs: Vec<_> = messages
             .iter()
