@@ -201,8 +201,7 @@ impl ConnectionTask {
                                 "No supported inverter model found. Available: {}",
                                 available
                             ),
-                        )
-                        .into());
+                        ));
                     }
 
                     // Try to read Model 1 for metadata/serial
@@ -263,7 +262,7 @@ impl ConnectionTask {
                                     "Failed to read Model 1 from device {}: {}",
                                     device_state.config.unit_id, pv_err
                                 );
-                                return Err(pv_err.into());
+                                return Err(pv_err);
                             } else {
                                 info!(
                                     "Failed to refresh Model 1 for device, using cached info (Serial: {:?})",
@@ -277,7 +276,7 @@ impl ConnectionTask {
                                 device_state.config.unit_id
                             ));
                             error!("{}", pv_err);
-                            return Err(pv_err.into());
+                            return Err(pv_err);
                         }
                     }
 

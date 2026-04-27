@@ -111,44 +111,39 @@ impl Config {
 
         for (name, value) in prefixes {
             if value.is_empty() {
-                return Err(Pv2MqttError::Config(format!("MQTT {} cannot be empty", name)).into());
+                return Err(Pv2MqttError::Config(format!("MQTT {} cannot be empty", name)));
             }
             if value.ends_with('/') {
                 return Err(Pv2MqttError::Config(format!(
                     "MQTT {} '{}' cannot end with a slash",
                     name, value
-                ))
-                .into());
+                )));
             }
             if value.contains("//") {
                 return Err(Pv2MqttError::Config(format!(
                     "MQTT {} '{}' cannot contain double slashes",
                     name, value
-                ))
-                .into());
+                )));
             }
         }
 
         if self.connections.is_empty() {
             return Err(Pv2MqttError::Config(
                 "At least one connection must be defined".to_string(),
-            )
-            .into());
+            ));
         }
 
         for conn in &self.connections {
             if conn.name.trim().is_empty() {
                 return Err(Pv2MqttError::Config(
                     "Connection name cannot be empty or only whitespace".to_string(),
-                )
-                .into());
+                ));
             }
             if conn.devices.is_empty() {
                 return Err(Pv2MqttError::Config(format!(
                     "Connection '{}' must have at least one device",
                     conn.name
-                ))
-                .into());
+                )));
             }
 
             match &conn.modbus {
@@ -161,14 +156,13 @@ impl Config {
                                 "Invalid TCP address '{}' in connection '{}'. Expected 'hostname:port' or 'ip:port'.",
                                 address,
                                 conn.name
-                            )).into());
+                            )));
                         }
                         if parts[0].is_empty() {
                             return Err(Pv2MqttError::Config(format!(
                                 "Host part of address '{}' cannot be empty in connection '{}'",
                                 address, conn.name
-                            ))
-                            .into());
+                            )));
                         }
                         let _: u16 = parts[1].parse().map_err(|e| {
                             Pv2MqttError::Config(format!(
@@ -185,15 +179,13 @@ impl Config {
                         return Err(Pv2MqttError::Config(format!(
                             "RTU device path cannot be empty in connection '{}'",
                             conn.name
-                        ))
-                        .into());
+                        )));
                     }
                     if *baud_rate == 0 {
                         return Err(Pv2MqttError::Config(format!(
                             "RTU baud rate cannot be 0 in connection '{}'",
                             conn.name
-                        ))
-                        .into());
+                        )));
                     }
                 }
             }
@@ -203,8 +195,7 @@ impl Config {
                 return Err(Pv2MqttError::Config(format!(
                     "Keep-alive interval {} is too large in connection '{}' (max 3600s)",
                     ka, conn.name
-                ))
-                .into());
+                )));
             }
 
             let mut unit_ids = std::collections::HashSet::new();
@@ -213,23 +204,20 @@ impl Config {
                     return Err(Pv2MqttError::Config(format!(
                         "Duplicate unit_id {} in connection '{}'",
                         device.unit_id, conn.name
-                    ))
-                    .into());
+                    )));
                 }
                 if device.unit_id == 0 || device.unit_id > 247 {
                     return Err(Pv2MqttError::Config(format!(
                         "Device unit_id {} is out of valid Modbus range (1-247) in connection '{}'",
                         device.unit_id, conn.name
-                    ))
-                    .into());
+                    )));
                 }
                 if !(1..=3600).contains(&device.interval) {
                     return Err(Pv2MqttError::Config(format!(
                         "Device polling interval {} is out of reasonable range (1-3600s) in connection '{}'",
                         device.interval,
                         conn.name
-                    ))
-                    .into());
+                    )));
                 }
             }
         }
