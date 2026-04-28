@@ -127,6 +127,13 @@ impl ConnectionTask {
                     "Error: {}. Reconnecting in {}s...",
                     e, RECONNECT_TIMEOUT_SECS
                 );
+
+                // Explicitly clear any old connection handles immediately after an error.
+                // This ensures that the previous socket/serial port is closed before we sleep.
+                for device_state in devices.iter_mut() {
+                    device_state.clear_connection();
+                }
+
                 tokio::select! {
                     biased;
                     _ = self.token.cancelled() => break,

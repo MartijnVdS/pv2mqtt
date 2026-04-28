@@ -66,7 +66,7 @@ impl From<tokio_modbus::Error> for ModbusError {
     fn from(e: tokio_modbus::Error) -> Self {
         match e {
             tokio_modbus::Error::Transport(io_err) => Self::Io(io_err),
-            _ => Self::Protocol(e.to_string()),
+            _ => Self::Io(std::io::Error::other(e)),
         }
     }
 }
@@ -76,7 +76,10 @@ impl From<SunSpecModbusError> for ModbusError {
         match e {
             SunSpecModbusError::Timeout => Self::Timeout("Timeout".to_string()),
             SunSpecModbusError::IO(io_err) => Self::Io(io_err),
-            _ => Self::Protocol(e.to_string()),
+            SunSpecModbusError::IllegalFunction
+            | SunSpecModbusError::IllegalDataAddress
+            | SunSpecModbusError::IllegalDataValue => Self::Protocol(e.to_string()),
+            _ => Self::Io(std::io::Error::other(e)),
         }
     }
 }
