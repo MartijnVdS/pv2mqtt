@@ -108,6 +108,7 @@ impl ConnectionTask {
             // This ensures that the previous socket/serial port is closed.
             for device_state in devices.iter_mut() {
                 device_state.clear_connection();
+                device_state.last_poll = None; // Reset so discovery/poll happens immediately after reconnect
             }
 
             if !first_run {
@@ -116,7 +117,8 @@ impl ConnectionTask {
 
             let result: Result<()> = async {
                 let ctx = self.establish_connection().await?;
-                info!("Connected");
+                let ctx = Arc::new(Mutex::new(ctx));
+
                 self.run_polling_loop(ctx, &mut devices).await?;
                 Ok(())
             }
@@ -124,7 +126,7 @@ impl ConnectionTask {
 
             if let Err(e) = result {
                 error!(
-                    "Error: {}. Reconnecting in {}s...",
+                    "Connection error: {}. Reconnecting in {}s...",
                     e, RECONNECT_TIMEOUT_SECS
                 );
 
@@ -149,7 +151,7 @@ impl ConnectionTask {
 
     async fn run_polling_loop(
         &self,
-        ctx: ModbusContext,
+        ctx: Arc<Mutex<ModbusContext>>,
         devices: &mut [DeviceState],
     ) -> Result<()> {
         let client = AsyncClient::new(
@@ -173,12 +175,13 @@ impl ConnectionTask {
             }
 
             let now = Instant::now();
-            // Start with next keep-alive as the upper bound if enabled
-            let mut next_wakeup = if keep_alive_interval > 0 {
-                last_activity + keep_alive_duration
-            } else {
-                now + Duration::from_secs(3600) // Default large sleep
-            };
+            // Start with next keep-alive as the upper bound if enabled AND we have a discovered device
+            let mut next_wakeup =
+                if keep_alive_interval > 0 && devices.iter().any(|d| d.device.is_some()) {
+                    last_activity + keep_alive_duration
+                } else {
+                    now + Duration::from_secs(3600) // Default large sleep
+                };
 
             for device_state in devices.iter() {
                 let interval = Duration::from_secs(device_state.config.interval);
@@ -301,6 +304,7 @@ impl ConnectionTask {
         let span = info_span!("discovery", unit_id);
 
         async {
+            debug!("Starting discovery for unit {}", unit_id);
             let device_res = tokio::time::timeout(
                 Duration::from_secs(POLL_TIMEOUT_SECS),
                 client.device(unit_id),
@@ -308,11 +312,16 @@ impl ConnectionTask {
             .await;
 
             let device = match device_res {
-                Ok(Ok(d)) => d,
+                Ok(Ok(d)) => {
+                    debug!("Successfully identified unit {} as SunSpec device", unit_id);
+                    d
+                }
                 Ok(Err(e)) => {
+                    warn!("Modbus error during discovery for unit {}: {}", unit_id, e);
                     return Err(Pv2MqttError::DeviceDiscovery(unit_id, ModbusError::from(e)));
                 }
                 Err(_) => {
+                    warn!("Timeout during discovery for unit {}", unit_id);
                     return Err(Pv2MqttError::Modbus(ModbusError::Timeout(format!(
                         "Timeout discovering device {}",
                         unit_id
@@ -424,6 +433,9 @@ impl ConnectionTask {
                 .await
                 .map_err(|_| ModbusError::Timeout(format!("Timeout connecting to {}", address)))?
                 .map_err(ModbusError::Io)?;
+
+                // Optimize TCP connection
+                let _ = stream.set_nodelay(true);
 
                 if *tls {
                     let config = ClientConfig::builder()

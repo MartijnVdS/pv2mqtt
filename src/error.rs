@@ -65,7 +65,19 @@ pub type Result<T> = std::result::Result<T, Pv2MqttError>;
 impl From<tokio_modbus::Error> for ModbusError {
     fn from(e: tokio_modbus::Error) -> Self {
         match e {
-            tokio_modbus::Error::Transport(io_err) => Self::Io(io_err),
+            tokio_modbus::Error::Transport(io_err) => {
+                // os error 0 (Success) in an IO error context often means Unexpected EOF (connection closed)
+                if io_err.raw_os_error() == Some(0)
+                    || io_err.kind() == std::io::ErrorKind::UnexpectedEof
+                {
+                    Self::Io(std::io::Error::new(
+                        std::io::ErrorKind::ConnectionAborted,
+                        "Connection closed by peer",
+                    ))
+                } else {
+                    Self::Io(io_err)
+                }
+            }
             _ => Self::Io(std::io::Error::other(e)),
         }
     }
@@ -75,7 +87,18 @@ impl From<SunSpecModbusError> for ModbusError {
     fn from(e: SunSpecModbusError) -> Self {
         match e {
             SunSpecModbusError::Timeout => Self::Timeout("Timeout".to_string()),
-            SunSpecModbusError::IO(io_err) => Self::Io(io_err),
+            SunSpecModbusError::IO(io_err) => {
+                if io_err.raw_os_error() == Some(0)
+                    || io_err.kind() == std::io::ErrorKind::UnexpectedEof
+                {
+                    Self::Io(std::io::Error::new(
+                        std::io::ErrorKind::ConnectionAborted,
+                        "Connection closed by peer",
+                    ))
+                } else {
+                    Self::Io(io_err)
+                }
+            }
             SunSpecModbusError::IllegalFunction
             | SunSpecModbusError::IllegalDataAddress
             | SunSpecModbusError::IllegalDataValue => Self::Protocol(e.to_string()),
