@@ -72,17 +72,9 @@ async fn main() -> Result<()> {
     let mqtt_certs = Arc::clone(&root_cert_store);
     let mqtt_handle = tokio::spawn(async move {
         let task = MqttTask::new(mqtt_config, mqtt_rx, mqtt_certs);
-        let handle = tokio::spawn(async move { task.run().await });
-        match handle.await {
-            Ok(Ok(_)) => info!("MQTT task finished cleanly"),
-            Ok(Err(e)) => error!("MQTT task failed: {}", e),
-            Err(e) => {
-                if e.is_panic() {
-                    error!("MQTT task panicked!");
-                } else {
-                    error!("MQTT task join error: {}", e);
-                }
-            }
+        match task.run().await {
+            Ok(_) => info!("MQTT task finished cleanly"),
+            Err(e) => error!("MQTT task failed: {}", e),
         }
     });
 
