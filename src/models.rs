@@ -35,7 +35,7 @@ pub struct InverterData {
     #[serde(rename = "VAr")]
     pub v_ar: Option<f32>,
     #[serde(rename = "WH")]
-    pub wh: f32,
+    pub wh: f64,
     #[serde(rename = "PF")]
     pub pf: Option<f32>,
     #[serde(rename = "Hz")]
@@ -66,11 +66,11 @@ fn apply_sf_i16(val: i16, sf: i16) -> Option<f32> {
     Some(val as f32 * 10f32.powi(sf as i32))
 }
 
-fn apply_sf_u32(val: u32, sf: i16) -> Option<f32> {
+fn apply_sf_u32_f64(val: u32, sf: i16) -> Option<f64> {
     if val == SUNSPEC_UNIMPLEMENTED_U32 {
         return None;
     }
-    Some(val as f32 * 10f32.powi(sf as i32))
+    Some(val as f64 * 10f64.powi(sf as i32))
 }
 
 fn apply_sf_i16_opt(val: Option<i16>, sf: Option<i16>) -> Option<f32> {
@@ -156,7 +156,7 @@ macro_rules! impl_int_model {
                     w: apply_sf_i16(m.w, m.w_sf).unwrap_or(0.0),
                     va: apply_sf_i16_opt(m.va, m.va_sf),
                     v_ar: apply_sf_i16_opt(m.v_ar, m.v_ar_sf),
-                    wh: apply_sf_u32(m.wh, m.wh_sf).unwrap_or(0.0),
+                    wh: apply_sf_u32_f64(m.wh, m.wh_sf).unwrap_or(0.0),
                     pf: apply_sf_i16_opt(m.pf, m.pf_sf),
                     hz: apply_sf(m.hz, m.hz_sf).unwrap_or(0.0),
                     st: m.st.to_status_string(),
@@ -185,7 +185,7 @@ macro_rules! impl_float_model {
                     w: m.w,
                     va: m.va,
                     v_ar: m.v_ar,
-                    wh: m.wh,
+                    wh: m.wh as f64,
                     pf: m.pf,
                     hz: m.hz,
                     st: m.st.to_status_string(),
@@ -518,10 +518,10 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_sf_u32() {
-        assert_relative_eq!(apply_sf_u32(100000, 0).unwrap(), 100000.0);
-        assert_relative_eq!(apply_sf_u32(123456, -2).unwrap(), 1234.56);
-        assert_eq!(apply_sf_u32(SUNSPEC_UNIMPLEMENTED_U32, -2), None);
+    fn test_apply_sf_u32_f64() {
+        assert_relative_eq!(apply_sf_u32_f64(100000, 0).unwrap(), 100000.0);
+        assert_relative_eq!(apply_sf_u32_f64(123456, -2).unwrap(), 1234.56);
+        assert_eq!(apply_sf_u32_f64(SUNSPEC_UNIMPLEMENTED_U32, -2), None);
     }
 
     #[test]
@@ -633,6 +633,18 @@ mod tests {
         let data = InverterData::from(m113);
         assert_relative_eq!(data.w, 12000.0);
         assert_eq!(data.st, "MPPT");
+    }
+
+    #[test]
+    fn test_model101_large_energy_precision() {
+        let mut m101 = empty_m101();
+        // 20,000,001 Wh
+        m101.wh = 20000001;
+        m101.wh_sf = 0;
+
+        let data = InverterData::from(m101);
+        // f32 would have lost precision here and returned 20000000.0
+        assert_eq!(data.wh, 20000001.0);
     }
 
     #[test]

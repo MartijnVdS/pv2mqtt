@@ -547,7 +547,7 @@ impl ConnectionTask {
                         .send(MqttMessage::Publish {
                             topic: status_topic,
                             payload: status_payload,
-                            retain: false,
+                            retain: true,
                         })
                         .await?;
                 }
@@ -569,7 +569,7 @@ impl ConnectionTask {
                         .send(MqttMessage::Publish {
                             topic: status_topic,
                             payload: status_payload,
-                            retain: false,
+                            retain: true,
                         })
                         .await;
                     return Err(pv_err);
@@ -591,7 +591,7 @@ impl ConnectionTask {
                         .send(MqttMessage::Publish {
                             topic: status_topic,
                             payload: status_payload,
-                            retain: false,
+                            retain: true,
                         })
                         .await;
                     return Err(pv_err);
