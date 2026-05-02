@@ -38,4 +38,13 @@ FROM debian:trixie-slim
 WORKDIR /app
 COPY --from=builder /usr/src/pv2mqtt/pv2mqtt /app/pv2mqtt
 
-ENTRYPOINT ["/app/pv2mqtt"]
+# 1. Create a system group and user
+# -r: system account
+# -g: specify the primary group
+# -G dialout: add to dialout group for serial port access
+# -s /sbin/nologin: prevents the user from logging in via shell (security)
+RUN groupadd -r appgroup && useradd -r -g appgroup -G dialout -s /sbin/nologin appuser
+
+USER appuser
+
+ENTRYPOINT ["/app/pv2mqtt", "/app/pv2mqtt.toml"]
