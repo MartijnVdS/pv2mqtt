@@ -32,6 +32,13 @@ const POLL_TIMEOUT_SECS: u64 = 10;
 const READ_TIMEOUT_SECS: u64 = 10;
 const RECONNECT_TIMEOUT_SECS: u64 = 10;
 
+// SunSpec Model 123 (Immediate Controls) Data-Relative Offsets (Spec Offset - 2)
+// These match the 'offset' attribute in SunSpec smdx_00123.xml
+const M123_CONN_OFFSET: u16 = 2;
+const M123_WMAX_LIM_PCT_OFFSET: u16 = 3;
+const M123_WMAX_LIM_ENA_OFFSET: u16 = 7;
+const M123_WMAX_LIM_PCT_SF_OFFSET: u16 = 21;
+
 pub struct ConnectionTask {
     config: ConnectionConfig,
     mqtt_tx: mpsc::Sender<MqttMessage>,
@@ -595,16 +602,15 @@ impl ConnectionTask {
 
             match action {
                 ControlAction::Conn(connect) => {
-                    // Conn is at offset 4 (Model relative) -> 2 (Data relative)
                     let val = if connect { 1 } else { 0 };
                     debug!(
                         "Writing Conn={} (val={}) to address {}",
                         connect,
                         val,
-                        base_addr + 2
+                        base_addr + M123_CONN_OFFSET
                     );
                     modbus
-                        .write_multiple_registers(base_addr + 2, &[val])
+                        .write_multiple_registers(base_addr + M123_CONN_OFFSET, &[val])
                         .await
                         .map_err(ModbusError::from)?
                         .map_err(|e| {
@@ -612,9 +618,8 @@ impl ConnectionTask {
                         })?;
                 }
                 ControlAction::WMaxLimPct(pct) => {
-                    // Read WMaxLimPct_SF (Model relative offset 23 -> Data relative 21)
                     let regs = modbus
-                        .read_holding_registers(base_addr + 21, 1)
+                        .read_holding_registers(base_addr + M123_WMAX_LIM_PCT_SF_OFFSET, 1)
                         .await
                         .map_err(ModbusError::from)?
                         .map_err(|e| {
@@ -626,15 +631,14 @@ impl ConnectionTask {
                     let factor = 10f32.powi(sf as i32);
                     let raw = (pct / factor).round() as u16;
 
-                    // WMaxLimPct is at offset 5 (Model relative) -> 3 (Data relative)
                     debug!(
                         "Writing WMaxLimPct={} (raw={}) to address {}",
                         pct,
                         raw,
-                        base_addr + 3
+                        base_addr + M123_WMAX_LIM_PCT_OFFSET
                     );
                     modbus
-                        .write_multiple_registers(base_addr + 3, &[raw])
+                        .write_multiple_registers(base_addr + M123_WMAX_LIM_PCT_OFFSET, &[raw])
                         .await
                         .map_err(ModbusError::from)?
                         .map_err(|e| {
@@ -645,16 +649,15 @@ impl ConnectionTask {
                         })?;
                 }
                 ControlAction::WMaxLimEna(enable) => {
-                    // WMaxLim_Ena is at offset 9 (Model relative) -> 7 (Data relative)
                     let val = if enable { 1 } else { 0 };
                     debug!(
                         "Writing WMaxLim_Ena={} (val={}) to address {}",
                         enable,
                         val,
-                        base_addr + 7
+                        base_addr + M123_WMAX_LIM_ENA_OFFSET
                     );
                     modbus
-                        .write_multiple_registers(base_addr + 7, &[val])
+                        .write_multiple_registers(base_addr + M123_WMAX_LIM_ENA_OFFSET, &[val])
                         .await
                         .map_err(ModbusError::from)?
                         .map_err(|e| {
@@ -1511,7 +1514,8 @@ mod tests {
             // Model 123 (Immediate Controls)
             r[next_addr] = 123; // Model ID
             r[next_addr + 1] = 24; // Length
-            r[next_addr + 23] = 0xFFFE; // SF = -2 (as i16)
+            // Constants are data-relative, so we add 2 to match model-relative layout
+            r[next_addr + (M123_WMAX_LIM_PCT_SF_OFFSET as usize + 2)] = 0xFFFE; // SF = -2 (as i16)
 
             // End of models marker
             r[next_addr + 26] = 0xFFFF;
@@ -1578,19 +1582,19 @@ mod tests {
         };
         cmd_tx.send(cmd).unwrap();
 
-        // Advance time and verify write to data-relative offset 3 (Model offset 5)
+        // Advance time and verify write to data-relative offset
         let mut write_verified = false;
         for _ in 0..10 {
             tokio::time::advance(Duration::from_millis(10)).await;
             let r = regs.lock().unwrap();
-            if r[m123_data_base + 3] == 7550 {
+            if r[m123_data_base + M123_WMAX_LIM_PCT_OFFSET as usize] == 7550 {
                 write_verified = true;
                 break;
             }
         }
         assert!(
             write_verified,
-            "WMaxLimPct register write did not occur at data-relative offset 3"
+            "WMaxLimPct register write did not occur at expected offset"
         );
 
         // Send a Conn command
@@ -1604,15 +1608,14 @@ mod tests {
         for _ in 0..100 {
             tokio::time::advance(Duration::from_millis(50)).await;
             let r = regs.lock().unwrap();
-            // Point offset 2 is Conn
-            if r[m123_data_base + 2] == 1 {
+            if r[m123_data_base + M123_CONN_OFFSET as usize] == 1 {
                 conn_verified = true;
                 break;
             }
         }
         assert!(
             conn_verified,
-            "Conn register write did not occur at data-relative offset 2"
+            "Conn register write did not occur at expected offset"
         );
 
         token_clone.cancel();
