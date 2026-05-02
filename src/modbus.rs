@@ -24,14 +24,13 @@ use tokio_serial::SerialStream;
 use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, debug, error, info, info_span, trace, warn};
 
+const COMMAND_POLL_DELAY_MILLIS: u64 = 250;
 const CONNECT_TIMEOUT_SECS: u64 = 10;
-const RECONNECT_TIMEOUT_SECS: u64 = 10;
-
-const READ_TIMEOUT_SECS: u64 = 10;
-const POLL_TIMEOUT_SECS: u64 = 10;
-
 const DEFAULT_IDLE_SLEEP_SECS: u64 = 3600;
 const MIN_SLEEP_MILLIS: u64 = 10;
+const POLL_TIMEOUT_SECS: u64 = 10;
+const READ_TIMEOUT_SECS: u64 = 10;
+const RECONNECT_TIMEOUT_SECS: u64 = 10;
 
 pub struct ConnectionTask {
     config: ConnectionConfig,
@@ -598,6 +597,12 @@ impl ConnectionTask {
                 ControlAction::Conn(connect) => {
                     // Conn is at offset 2 (relative to Model 123 base)
                     let val = if connect { 1 } else { 0 };
+                    debug!(
+                        "Writing Conn={} (val={}) to address {}",
+                        connect,
+                        val,
+                        base_addr + 2
+                    );
                     modbus
                         .write_multiple_registers(base_addr + 2, &[val])
                         .await
@@ -637,6 +642,12 @@ impl ConnectionTask {
                 ControlAction::WMaxLimEna(enable) => {
                     // WMaxLim_Ena is at offset 4
                     let val = if enable { 1 } else { 0 };
+                    debug!(
+                        "Writing WMaxLim_Ena={} (val={}) to address {}",
+                        enable,
+                        val,
+                        base_addr + 4
+                    );
                     modbus
                         .write_multiple_registers(base_addr + 4, &[val])
                         .await
@@ -657,9 +668,11 @@ impl ConnectionTask {
             error!("Failed to execute command for {}: {}", cmd.serial, e);
         } else {
             info!(
-                "Successfully executed command for {}. Triggering immediate poll.",
-                cmd.serial
+                "Successfully executed command for {}. Waiting {}ms before immediate poll.",
+                cmd.serial, COMMAND_POLL_DELAY_MILLIS
             );
+            // Small delay to allow hardware to settle and update internal state
+            tokio::time::sleep(Duration::from_millis(COMMAND_POLL_DELAY_MILLIS)).await;
             device_state.last_poll = None;
         }
     }
