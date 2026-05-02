@@ -96,6 +96,8 @@ fn handle_incoming_publish(
         }
     };
 
+    let payload_lc = payload.to_lowercase();
+
     // Expected topic: {prefix}/inverter/{serial}/set/{register}
     let parts: Vec<&str> = topic.split('/').collect();
     if parts.len() < 5 || parts[0] != topic_prefix || parts[1] != "inverter" || parts[3] != "set" {
@@ -106,15 +108,15 @@ fn handle_incoming_publish(
     let register = parts[4];
 
     let action = match register {
-        "Conn" => match payload {
-            "true" | "1" | "ON" => Some(ControlAction::Conn(true)),
-            "false" | "0" | "OFF" => Some(ControlAction::Conn(false)),
+        "Conn" => match payload_lc.as_str() {
+            "true" | "1" | "on" => Some(ControlAction::Conn(true)),
+            "false" | "0" | "off" => Some(ControlAction::Conn(false)),
             _ => None,
         },
         "WMaxLimPct" => payload.parse::<f32>().ok().map(ControlAction::WMaxLimPct),
-        "WMaxLim_Ena" => match payload {
-            "true" | "1" | "ON" => Some(ControlAction::WMaxLimEna(true)),
-            "false" | "0" | "OFF" => Some(ControlAction::WMaxLimEna(false)),
+        "WMaxLim_Ena" => match payload_lc.as_str() {
+            "true" | "1" | "on" => Some(ControlAction::WMaxLimEna(true)),
+            "false" | "0" | "off" => Some(ControlAction::WMaxLimEna(false)),
             _ => None,
         },
         _ => None,
