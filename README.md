@@ -102,12 +102,45 @@ Note: If no `config_file` is specified, `pv2mqtt` defaults to `/etc/pv2mqtt.toml
   permissions. If using RTU, the user only needs access to the specific serial
   device.
 
+## Bidirectional Controls (SunSpec Model 123)
+
+`pv2mqtt` supports bidirectional control of inverters that implement SunSpec Model 123 (Immediate Controls). This feature is disabled by default for safety and must be explicitly enabled per device in your configuration.
+
+### Enabling Controls
+In your `pv2mqtt.toml`, set `enable_controls = true` for the specific device:
+
+```toml
+[[connections.devices]]
+unit_id = 1
+interval = 30
+enable_controls = true
+```
+
+### Command Topics
+When enabled, you can send commands to the inverter by publishing to the
+following MQTT topics:
+
+- `pv2mqtt/inverter/{serial}/set/Conn`: Connect/Disconnect the inverter.
+  - Payloads: `ON`/`OFF`, `true`/`false`, or `1`/`0`.
+- `pv2mqtt/inverter/{serial}/set/WMaxLimPct`: Set the maximum active power as a
+  percentage of `WMax`.
+  - Payload: A float value (e.g., `75.5`).
+- `pv2mqtt/inverter/{serial}/set/WMaxLim_Ena`: Enable/Disable the power limit.
+  - Payloads: `ON`/`OFF`, `true`/`false`, or `1`/`0`.
+
+### Safety & Security Warnings
+- **Experimental Feature**: Bidirectional control can affect your energy
+  production (that's what it's for after all). Use with caution.
+- Isolation: Because Modbus lacks authentication, enabling controls increases
+  the importance of *Network Isolation*. Ensure your inverter cannot be reached
+  by unauthorized devices on your network.
+
 ## Features
 
 - *SunSpec Support*: Supports inverters that support the Sunspec protocol, and
   expose at least one of the following "models": 101, 102, 103, 111, 112, 113.
-- *Home Assistant Discovery*: Automatically registers inverters in Home Assistant
-  using MQTT autodiscovery.
+- *Home Assistant Discovery*: Automatically registers inverters in Home
+  Assistant using MQTT autodiscovery.
 - *JSON over MQTT*: Publishes data to MQTT in JSON format.
 - *Security*: Supports TLS connections for MQTT and Modbus-TCP.
 - *Robust*: Handles connection drops and reconnects automatically.

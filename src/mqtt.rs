@@ -33,10 +33,12 @@ pub struct MqttTask {
 }
 
 async fn run_eventloop(
+    client: AsyncClient,
     mut eventloop: EventLoop,
     cmd_tx: tokio::sync::broadcast::Sender<ModbusCommand>,
     topic_prefix: String,
 ) -> Result<()> {
+    let subscribe_topic = format!("{}/inverter/+/set/+", topic_prefix);
     loop {
         match eventloop.poll().await {
             Ok(notification) => {
@@ -44,6 +46,10 @@ async fn run_eventloop(
                 match notification {
                     Event::Incoming(Incoming::ConnAck(_)) => {
                         info!("MQTT connected");
+                        debug!("Re-subscribing to {}", subscribe_topic);
+                        if let Err(e) = client.subscribe(&subscribe_topic, QoS::AtLeastOnce).await {
+                            error!("Failed to subscribe to {}: {}", subscribe_topic, e);
+                        }
                     }
                     Event::Incoming(Incoming::Publish(p)) => {
                         handle_incoming_publish(&p, &cmd_tx, &topic_prefix);
@@ -188,16 +194,6 @@ impl MqttTask {
 
         let (client, eventloop) = AsyncClient::builder(mqttoptions).capacity(20).build_async();
 
-        // Subscribe to set topics: {prefix}/inverter/+/set/+
-        let subscribe_topic = format!("{}/inverter/+/set/+", self.config.topic_prefix);
-        info!("Subscribing to {}", subscribe_topic);
-        client
-            .subscribe(subscribe_topic, QoS::AtLeastOnce)
-            .await
-            .map_err(|e| {
-                Pv2MqttError::MqttConnection(format!("Failed to subscribe to set topics: {}", e))
-            })?;
-
         info!(
             "MQTT task starting connection to {}",
             self.config.masked_url()
@@ -205,10 +201,14 @@ impl MqttTask {
 
         let topic_prefix = self.config.topic_prefix.clone();
         let eventloop_cmd_tx = self.cmd_tx.clone();
-        let eventloop_handle = tokio::spawn(
-            async move { run_eventloop(eventloop, eventloop_cmd_tx, topic_prefix).await }
+        let client_clone = client.clone();
+        let eventloop_handle =
+            tokio::spawn(
+                async move {
+                    run_eventloop(client_clone, eventloop, eventloop_cmd_tx, topic_prefix).await
+                }
                 .instrument(info_span!("mqtt_eventloop")),
-        );
+            );
 
         while let Some(msg) = self.rx.recv().await {
             match msg {

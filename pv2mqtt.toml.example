@@ -65,6 +65,12 @@ unit_id = 1
 # and excessive load on the MQTT broker.
 interval = 30
 
+# Enable bidirectional controls (SunSpec Model 123 support).
+# This allows sending commands to the inverter via MQTT.
+# See README.md for available control topics and security warnings.
+# Default: false
+# enable_controls = true
+
 # Example for Modbus-RTU (Serial, RS-485):
 #
 #[connections.modbus]

@@ -414,12 +414,16 @@ impl ConnectionTask {
                         device_state.manufacturer = Some(manufacturer.clone());
                         device_state.model = Some(model.clone());
                         device_state.version = version_opt.clone();
+                        let has_controls =
+                            device_state.config.enable_controls && available_models.contains(&123);
+
                         self.publish_discovery(
                             &serial,
                             &manufacturer,
                             &model,
                             version_opt.as_deref(),
                             device_state.supported_model,
+                            has_controls,
                         )
                         .await?;
                     } else {
@@ -859,6 +863,7 @@ impl ConnectionTask {
         model: &str,
         version: Option<&str>,
         model_id: Option<u16>,
+        enable_controls: bool,
     ) -> Result<()> {
         let mut sensors = vec![
             ("W", Some("W"), Some("power"), Some("measurement"), "Power"),
@@ -989,9 +994,7 @@ impl ConnectionTask {
         }
 
         // Add control entities if Model 123 is enabled
-        if let Some(id) = model_id
-            && id == 123
-        {
+        if enable_controls {
             let controls = vec![
                 (
                     "Conn",
@@ -1555,6 +1558,104 @@ mod tests {
 
         token_clone.cancel();
         // Advance time to allow the cancellation to propagate and loop to exit
+        tokio::time::advance(Duration::from_millis(100)).await;
+        let _ = task_handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    #[traced_test]
+    async fn test_command_ignored_when_controls_disabled() {
+        tokio::time::pause();
+
+        let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let handle_mock = modbus_test_utils::start_mock_server(addr).await;
+        let addr_str = handle_mock.addr.to_string();
+        let regs = handle_mock.registers;
+
+        {
+            let mut r = regs.lock().unwrap();
+            let next_addr = setup_mock_sunspec_registers(&mut r);
+            r[next_addr] = 123;
+            r[next_addr + 1] = 24;
+            r[next_addr + 2 + 23] = 0xFFFE; // SF = -2
+            r[next_addr + 2 + 24] = 0xFFFF;
+        }
+
+        let (tx, mut rx) = mpsc::channel(100);
+        let token = CancellationToken::new();
+        let root_cert_store = Arc::new(rustls::RootCertStore::empty());
+
+        let (cmd_tx, cmd_rx) = tokio::sync::broadcast::channel(1);
+        let task = ConnectionTask {
+            config: ConnectionConfig {
+                name: "test".to_string(),
+                modbus: ModbusConfig::Tcp {
+                    address: addr_str,
+                    tls: false,
+                    ca_path: None,
+                    cert_path: None,
+                    key_path: None,
+                },
+                devices: vec![DeviceConfig {
+                    unit_id: 1,
+                    interval: 60,
+                    enable_controls: false, // DISABLED
+                }],
+                keep_alive_interval: None,
+            },
+            mqtt_tx: tx,
+            topic_prefix: "solar".to_string(),
+            ha_prefix: "homeassistant".to_string(),
+            token: token.clone(),
+            root_cert_store,
+            cmd_rx,
+        };
+
+        let token_clone = token.clone();
+        let task_handle = tokio::spawn(async move { task.run_internal().await });
+
+        // Advance to finish discovery
+        let mut messages = Vec::new();
+        for _ in 0..100 {
+            tokio::time::advance(Duration::from_millis(10)).await;
+            while let Ok(msg) = rx.try_recv() {
+                messages.push(msg);
+            }
+            if !messages.is_empty() {
+                break;
+            }
+        }
+        // Send a command
+        let cmd = crate::commands::ModbusCommand {
+            serial: "SN1234".to_string(),
+            action: crate::commands::ControlAction::WMaxLimPct(75.5),
+        };
+        cmd_tx.send(cmd).unwrap();
+
+        // Advance time to allow processing.
+        // We use a loop to ensure handle_command has a chance to run.
+        let mut command_logged = false;
+        for _ in 0..10 {
+            tokio::time::advance(Duration::from_millis(10)).await;
+            tokio::task::yield_now().await;
+            if logs_contain(
+                "Received command for device SN1234, but controls are not enabled in config",
+            ) {
+                command_logged = true;
+                break;
+            }
+        }
+
+        {
+            let r = regs.lock().unwrap();
+            // Register should still be 0, not 7550
+            assert_eq!(r[40124 + 3], 0);
+        }
+
+        // Verify warning log
+        assert!(command_logged, "Did not see expected warning log");
+
+        token_clone.cancel();
         tokio::time::advance(Duration::from_millis(100)).await;
         let _ = task_handle.await.unwrap();
     }
