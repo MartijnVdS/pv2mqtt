@@ -1,8 +1,12 @@
-version: '3.8'
-
+# ⚠️ This is a docker-compose configuration for development purposes ⚠️
+#
+# For production use, set up an isolated network, password authentication
+# and/or mTLS and disable trace logging.
+#
 services:
   mosquitto:
     image: eclipse-mosquitto:latest
+    restart: unless-stopped
     ports:
       - "1883:1883"
     volumes:
@@ -18,7 +22,6 @@ services:
       - mosquitto
     environment:
       RUST_LOG: pv2mqtt=trace
-    restart: unless-stopped
 
 volumes:
   mosquitto_data:
