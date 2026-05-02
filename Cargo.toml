@@ -19,9 +19,9 @@ tokio-util = "0.7"
 tokio-modbus = { version = "0.17", features = ["tcp", "rtu"] }
 tokio-serial = "5.4"
 rumqttc-next = { version = "0.31", default-features = false, features = ["url", "use-rustls-ring"] }
-tokio-rustls = "0.26"
+tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "ring"] }
 rustls-native-certs = "0.8"
-rustls = { version = "0.23", features = ["ring"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 rustls-pemfile = "2.1"
 sunspec = { version = "0.9", features = [
     "tokio",
