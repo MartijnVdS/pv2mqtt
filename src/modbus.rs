@@ -19,7 +19,7 @@ use tokio_modbus::Slave;
 use tokio_modbus::client::{Context as ModbusContext, Reader, rtu, tcp};
 use tokio_modbus::slave::SlaveContext;
 use tokio_rustls::TlsConnector;
-use tokio_rustls::rustls::{ClientConfig, pki_types::ServerName};
+use tokio_rustls::rustls::pki_types::ServerName;
 use tokio_serial::SerialStream;
 use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, debug, error, info, info_span, trace, warn};
@@ -424,7 +424,12 @@ impl ConnectionTask {
 
     async fn establish_connection(&self) -> Result<ModbusContext> {
         match &self.config.modbus {
-            ModbusConfig::Tcp { address, tls } => {
+            ModbusConfig::Tcp {
+                address,
+                tls,
+                cert_path,
+                key_path,
+            } => {
                 info!("Connecting to Modbus TCP at {} (TLS: {})", address, tls);
                 let stream = tokio::time::timeout(
                     Duration::from_secs(CONNECT_TIMEOUT_SECS),
@@ -438,10 +443,17 @@ impl ConnectionTask {
                 let _ = stream.set_nodelay(true);
 
                 if *tls {
-                    let config = ClientConfig::builder()
-                        .with_root_certificates(Arc::clone(&self.root_cert_store))
-                        .with_no_client_auth();
-                    let connector = TlsConnector::from(Arc::new(config));
+                    if cert_path.is_some() || key_path.is_some() {
+                        info!("Using mTLS for Modbus connection");
+                    }
+
+                    let client_config = crate::tls::create_client_config(
+                        Arc::clone(&self.root_cert_store),
+                        cert_path.as_deref(),
+                        key_path.as_deref(),
+                    )?;
+
+                    let connector = TlsConnector::from(Arc::new(client_config));
 
                     let host = address
                         .split(':')
@@ -870,6 +882,8 @@ mod tests {
                 modbus: ModbusConfig::Tcp {
                     address: "127.0.0.1:502".to_string(),
                     tls: false,
+                    cert_path: None,
+                    key_path: None,
                 },
                 devices: vec![],
                 keep_alive_interval: None,
@@ -968,6 +982,8 @@ mod tests {
                 modbus: ModbusConfig::Tcp {
                     address: addr_str,
                     tls: false,
+                    cert_path: None,
+                    key_path: None,
                 },
                 devices: vec![DeviceConfig {
                     unit_id: 1,
@@ -1061,6 +1077,8 @@ mod tests {
                 modbus: ModbusConfig::Tcp {
                     address: addr_str,
                     tls: false,
+                    cert_path: None,
+                    key_path: None,
                 },
                 devices: vec![DeviceConfig {
                     unit_id: 1,

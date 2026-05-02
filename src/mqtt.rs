@@ -88,16 +88,22 @@ impl MqttTask {
         mqttoptions.set_keep_alive(MQTT_KEEPALIVE_INTERVAL_SECS);
 
         if is_tls {
-            let client_config = rustls::ClientConfig::builder()
-                .with_root_certificates(Arc::clone(&self.root_cert_store))
-                .with_no_client_auth();
+            if self.config.cert_path.is_some() || self.config.key_path.is_some() {
+                info!("Using mTLS for MQTT connection");
+            }
+
+            let client_config = crate::tls::create_client_config(
+                Arc::clone(&self.root_cert_store),
+                self.config.cert_path.as_deref(),
+                self.config.key_path.as_deref(),
+            )?;
 
             mqttoptions.set_transport(Transport::tls_with_config(TlsConfiguration::Rustls(
                 Arc::new(client_config),
             )));
         }
 
-        let (client, eventloop) = AsyncClient::new(mqttoptions, 20);
+        let (client, eventloop) = AsyncClient::builder(mqttoptions).capacity(20).build_async();
 
         info!(
             "MQTT task starting connection to {}",
@@ -150,6 +156,8 @@ mod tests {
             client_id: "test".to_string(),
             topic_prefix: "solar".to_string(),
             ha_prefix: "homeassistant".to_string(),
+            cert_path: None,
+            key_path: None,
         };
 
         let root_cert_store = Arc::new(rustls::RootCertStore::empty());
@@ -173,6 +181,8 @@ mod tests {
             client_id: "test".to_string(),
             topic_prefix: "solar".to_string(),
             ha_prefix: "homeassistant".to_string(),
+            cert_path: None,
+            key_path: None,
         };
 
         let root_cert_store = Arc::new(rustls::RootCertStore::empty());

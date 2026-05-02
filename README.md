@@ -65,10 +65,21 @@ If you have Rust installed, you can build and run it directly:
 
 ```shell
 # Build and run
-cargo run --release
+cargo run --release -- [config_file]
 ```
 
-Note: `pv2mqtt` expects `pv2mqtt.toml` to be in the current working directory.
+Note: If no `config_file` is specified, `pv2mqtt` defaults to `/etc/pv2mqtt.conf`.
+
+## Security Best Practices
+
+- Use TLS/mTLS: Always enable TLS for MQTT and Modbus-TCP when supported.
+  `pv2mqtt` supports Mutual TLS (mTLS) for both by providing `cert_path` and
+  `key_path` in the configuration.
+- Network Isolation: Isolate your inverters and the machine running `pv2mqtt`
+  on a trusted, monitored network segment.
+- Principle of Least Privilege: Run `pv2mqtt` with the minimum necessary
+  permissions. If using RTU, the user only needs access to the specific serial
+  device.
 
 ## Features
 

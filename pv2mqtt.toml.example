@@ -18,6 +18,11 @@ topic_prefix = "pv2mqtt"
 # Change this if your HomeAssistant instance uses a non-default discovery prefix.
 ha_prefix = "homeassistant"
 
+# Optional: Mutual TLS (mTLS) settings for MQTT.
+# Provide paths to your client certificate and private key (PEM format).
+# cert_path = "/etc/pv2mqtt/certs/mqtt-client.crt"
+# key_path = "/etc/pv2mqtt/certs/mqtt-client.key"
+
 # Modbus connection definitions
 [[connections]]
 # Human-readable name for this connection (used in logs).
@@ -39,6 +44,10 @@ address = "192.0.2.10:502"
 # Optional: Enable TLS for Modbus Security (usually port 802).
 # tls = true 
 
+# Optional: Mutual TLS (mTLS) settings for Modbus-TCP.
+# cert_path = "/etc/pv2mqtt/certs/modbus-client.crt"
+# key_path = "/etc/pv2mqtt/certs/modbus-client.key"
+
 # RTU (Serial) connection settings example:
 # type = "rtu"
 # device = "/dev/ttyUSB0"
@@ -52,4 +61,6 @@ address = "192.0.2.10:502"
 unit_id = 1
 
 # Polling interval in seconds for this specific device.
+# Note: Low intervals (< 5s) can cause hardware lockups on some legacy inverters
+# and excessive load on the MQTT broker.
 interval = 30

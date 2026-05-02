@@ -22,6 +22,8 @@ pub struct MqttConfig {
     pub client_id: String,
     pub topic_prefix: String,
     pub ha_prefix: String,
+    pub cert_path: Option<String>,
+    pub key_path: Option<String>,
 }
 
 impl MqttConfig {
@@ -45,6 +47,8 @@ impl std::fmt::Debug for MqttConfig {
             .field("client_id", &self.client_id)
             .field("topic_prefix", &self.topic_prefix)
             .field("ha_prefix", &self.ha_prefix)
+            .field("cert_path", &self.cert_path)
+            .field("key_path", &self.key_path)
             .finish()
     }
 }
@@ -74,6 +78,8 @@ pub enum ModbusConfig {
         address: String,
         #[serde(default)]
         tls: bool,
+        cert_path: Option<String>,
+        key_path: Option<String>,
     },
     #[serde(rename = "rtu")]
     Rtu {
@@ -243,6 +249,8 @@ mod tests {
             client_id: "test".to_string(),
             topic_prefix: "pv2mqtt".to_string(),
             ha_prefix: "homeassistant".to_string(),
+            cert_path: None,
+            key_path: None,
         };
         assert_eq!(config.masked_url(), "mqtt://user:********@localhost:1883");
 
@@ -251,6 +259,8 @@ mod tests {
             client_id: "test".to_string(),
             topic_prefix: "pv2mqtt".to_string(),
             ha_prefix: "homeassistant".to_string(),
+            cert_path: None,
+            key_path: None,
         };
         assert_eq!(config_no_pass.masked_url(), "mqtt://localhost:1883");
     }
@@ -263,12 +273,16 @@ mod tests {
                 client_id: "test".to_string(),
                 topic_prefix: "solar/".to_string(),
                 ha_prefix: "homeassistant".to_string(),
+                cert_path: None,
+                key_path: None,
             },
             connections: vec![ConnectionConfig {
                 name: "test".to_string(),
                 modbus: ModbusConfig::Tcp {
                     address: "127.0.0.1:502".to_string(),
                     tls: false,
+                    cert_path: None,
+                    key_path: None,
                 },
                 devices: vec![DeviceConfig {
                     unit_id: 1,
@@ -298,12 +312,16 @@ mod tests {
                 client_id: "test".to_string(),
                 topic_prefix: "solar".to_string(),
                 ha_prefix: "homeassistant".to_string(),
+                cert_path: None,
+                key_path: None,
             },
             connections: vec![ConnectionConfig {
                 name: "test".to_string(),
                 modbus: ModbusConfig::Tcp {
                     address: "invalid-address".to_string(),
                     tls: false,
+                    cert_path: None,
+                    key_path: None,
                 },
                 devices: vec![DeviceConfig {
                     unit_id: 1,
@@ -318,6 +336,8 @@ mod tests {
         config.connections[0].modbus = ModbusConfig::Tcp {
             address: "inverter.local:502".to_string(),
             tls: true,
+            cert_path: None,
+            key_path: None,
         };
         assert!(config.validate().is_ok());
     }
@@ -330,6 +350,8 @@ mod tests {
                 client_id: "test".to_string(),
                 topic_prefix: "solar".to_string(),
                 ha_prefix: "homeassistant".to_string(),
+                cert_path: None,
+                key_path: None,
             },
             connections: vec![],
         };
@@ -343,7 +365,10 @@ mod tests {
             modbus: ModbusConfig::Tcp {
                 address: "127.0.0.1:502".to_string(),
                 tls: false,
+                cert_path: None,
+                key_path: None,
             },
+
             devices: vec![],
             keep_alive_interval: None,
         });
@@ -358,12 +383,16 @@ mod tests {
                 client_id: "test".to_string(),
                 topic_prefix: "solar".to_string(),
                 ha_prefix: "homeassistant".to_string(),
+                cert_path: None,
+                key_path: None,
             },
             connections: vec![ConnectionConfig {
                 name: "test".to_string(),
                 modbus: ModbusConfig::Tcp {
                     address: "127.0.0.1:502".to_string(),
                     tls: false,
+                    cert_path: None,
+                    key_path: None,
                 },
                 devices: vec![
                     DeviceConfig {
@@ -389,12 +418,16 @@ mod tests {
                 client_id: "test".to_string(),
                 topic_prefix: "solar".to_string(),
                 ha_prefix: "homeassistant".to_string(),
+                cert_path: None,
+                key_path: None,
             },
             connections: vec![ConnectionConfig {
                 name: "test".to_string(),
                 modbus: ModbusConfig::Tcp {
                     address: "127.0.0.1:502".to_string(),
                     tls: false,
+                    cert_path: None,
+                    key_path: None,
                 },
                 devices: vec![DeviceConfig {
                     unit_id: 248, // Out of range
@@ -413,18 +446,22 @@ mod tests {
 
     #[test]
     fn test_invalid_interval_range() {
-        let config = Config {
+        let mut config = Config {
             mqtt: MqttConfig {
                 url: "mqtt://localhost:1883".to_string(),
                 client_id: "test".to_string(),
                 topic_prefix: "solar".to_string(),
                 ha_prefix: "homeassistant".to_string(),
+                cert_path: None,
+                key_path: None,
             },
             connections: vec![ConnectionConfig {
                 name: "test".to_string(),
                 modbus: ModbusConfig::Tcp {
                     address: "127.0.0.1:502".to_string(),
                     tls: false,
+                    cert_path: None,
+                    key_path: None,
                 },
                 devices: vec![DeviceConfig {
                     unit_id: 1,
@@ -434,6 +471,12 @@ mod tests {
             }],
         };
         assert!(config.validate().is_err());
+
+        // Test boundary (minimum)
+        if let Some(conn) = config.connections.get_mut(0) {
+            conn.devices[0].interval = 1;
+        }
+        assert!(config.validate().is_ok());
     }
 
     #[test]
@@ -444,6 +487,8 @@ mod tests {
                 client_id: "test".to_string(),
                 topic_prefix: "solar".to_string(),
                 ha_prefix: "homeassistant".to_string(),
+                cert_path: None,
+                key_path: None,
             },
             connections: vec![ConnectionConfig {
                 name: "test".to_string(),
