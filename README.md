@@ -68,7 +68,7 @@ If you have Rust installed, you can build and run it directly:
 cargo run --release -- [config_file]
 ```
 
-Note: If no `config_file` is specified, `pv2mqtt` defaults to `/etc/pv2mqtt.conf`.
+Note: If no `config_file` is specified, `pv2mqtt` defaults to `/etc/pv2mqtt.toml`.
 
 ## Security Best Practices
 
