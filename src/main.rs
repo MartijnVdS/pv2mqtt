@@ -5,6 +5,7 @@ mod error;
 mod modbus;
 mod models;
 mod mqtt;
+mod tls;
 
 use crate::config::Config;
 use crate::error::{Pv2MqttError, Result};
@@ -15,6 +16,17 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
+
+fn get_config_path() -> Result<String> {
+    let args: Vec<String> = std::env::args().collect();
+    match args.len() {
+        1 => Ok("/etc/pv2mqtt.conf".to_string()),
+        2 => Ok(args[1].clone()),
+        _ => Err(Pv2MqttError::Config(
+            "Usage: pv2mqtt [config_file]".to_string(),
+        )),
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -52,8 +64,11 @@ async fn main() -> Result<()> {
 
     let root_cert_store = Arc::new(root_cert_store);
 
+    let config_path = get_config_path()?;
+    info!("Loading configuration from {}", config_path);
+
     // Load configuration
-    let config = match Config::load("pv2mqtt.toml") {
+    let config = match Config::load(&config_path) {
         Ok(c) => {
             info!("Configuration loaded successfully");
             c
