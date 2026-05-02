@@ -595,7 +595,7 @@ impl ConnectionTask {
 
             match action {
                 ControlAction::Conn(connect) => {
-                    // Conn is at offset 2 (relative to Model 123 base)
+                    // Conn is at offset 4 (Model relative) -> 2 (Data relative)
                     let val = if connect { 1 } else { 0 };
                     debug!(
                         "Writing Conn={} (val={}) to address {}",
@@ -612,9 +612,9 @@ impl ConnectionTask {
                         })?;
                 }
                 ControlAction::WMaxLimPct(pct) => {
-                    // Read WMaxLimPct_SF (offset 23) first
+                    // Read WMaxLimPct_SF (Model relative offset 23 -> Data relative 21)
                     let regs = modbus
-                        .read_holding_registers(base_addr + 23, 1)
+                        .read_holding_registers(base_addr + 21, 1)
                         .await
                         .map_err(ModbusError::from)?
                         .map_err(|e| {
@@ -623,11 +623,16 @@ impl ConnectionTask {
                     let sf = regs[0] as i16;
 
                     // Calculate raw value: raw = pct / 10^sf
-                    // For example: pct = 75.5, sf = -2 -> raw = 75.5 / 0.01 = 7550
                     let factor = 10f32.powi(sf as i32);
                     let raw = (pct / factor).round() as u16;
 
-                    // WMaxLimPct is at offset 3
+                    // WMaxLimPct is at offset 5 (Model relative) -> 3 (Data relative)
+                    debug!(
+                        "Writing WMaxLimPct={} (raw={}) to address {}",
+                        pct,
+                        raw,
+                        base_addr + 3
+                    );
                     modbus
                         .write_multiple_registers(base_addr + 3, &[raw])
                         .await
@@ -640,16 +645,16 @@ impl ConnectionTask {
                         })?;
                 }
                 ControlAction::WMaxLimEna(enable) => {
-                    // WMaxLim_Ena is at offset 4
+                    // WMaxLim_Ena is at offset 9 (Model relative) -> 7 (Data relative)
                     let val = if enable { 1 } else { 0 };
                     debug!(
                         "Writing WMaxLim_Ena={} (val={}) to address {}",
                         enable,
                         val,
-                        base_addr + 4
+                        base_addr + 7
                     );
                     modbus
-                        .write_multiple_registers(base_addr + 4, &[val])
+                        .write_multiple_registers(base_addr + 7, &[val])
                         .await
                         .map_err(ModbusError::from)?
                         .map_err(|e| {
@@ -1506,12 +1511,11 @@ mod tests {
             // Model 123 (Immediate Controls)
             r[next_addr] = 123; // Model ID
             r[next_addr + 1] = 24; // Length
-            let base = next_addr + 2;
-            r[base + 23] = 0xFFFE; // SF = -2 (as i16)
+            r[next_addr + 23] = 0xFFFE; // SF = -2 (as i16)
 
             // End of models marker
-            r[base + 24] = 0xFFFF;
-            r[base + 25] = 0;
+            r[next_addr + 26] = 0xFFFF;
+            r[next_addr + 27] = 0;
         }
 
         let (tx, mut rx) = mpsc::channel(100);
@@ -1547,6 +1551,9 @@ mod tests {
         let token_clone = token.clone();
         let task_handle = tokio::spawn(async move { task.run_internal().await });
 
+        // Wait a bit for discovery to finish
+        tokio::time::advance(Duration::from_millis(100)).await;
+
         // Discovery message is published after successful poll
         // We advance time to trigger the poll interval.
         let mut discovery_msg = None;
@@ -1561,26 +1568,52 @@ mod tests {
         }
         discovery_msg.expect("Did not receive discovery message within timeout");
 
-        // Send a command
+        // The data block starts at 40124 (next_addr + 2)
+        let m123_data_base = 40124;
+
+        // Send a command (WMaxLimPct)
         let cmd = crate::commands::ModbusCommand {
             serial: "SN1234".to_string(),
             action: crate::commands::ControlAction::WMaxLimPct(75.5),
         };
         cmd_tx.send(cmd).unwrap();
 
-        // Advance time just enough to trigger the select! branch for cmd_rx.recv()
-        // and allow handle_command to finish. We use a loop to ensure tasks run.
+        // Advance time and verify write to data-relative offset 3 (Model offset 5)
         let mut write_verified = false;
         for _ in 0..10 {
             tokio::time::advance(Duration::from_millis(10)).await;
             let r = regs.lock().unwrap();
-            let base = 40124;
-            if r[base + 3] == 7550 {
+            if r[m123_data_base + 3] == 7550 {
                 write_verified = true;
                 break;
             }
         }
-        assert!(write_verified, "Register write did not occur");
+        assert!(
+            write_verified,
+            "WMaxLimPct register write did not occur at data-relative offset 3"
+        );
+
+        // Send a Conn command
+        let cmd = crate::commands::ModbusCommand {
+            serial: "SN1234".to_string(),
+            action: crate::commands::ControlAction::Conn(true),
+        };
+        cmd_tx.send(cmd).unwrap();
+
+        let mut conn_verified = false;
+        for _ in 0..100 {
+            tokio::time::advance(Duration::from_millis(50)).await;
+            let r = regs.lock().unwrap();
+            // Point offset 2 is Conn
+            if r[m123_data_base + 2] == 1 {
+                conn_verified = true;
+                break;
+            }
+        }
+        assert!(
+            conn_verified,
+            "Conn register write did not occur at data-relative offset 2"
+        );
 
         token_clone.cancel();
         // Advance time to allow the cancellation to propagate and loop to exit
@@ -1663,7 +1696,6 @@ mod tests {
         let mut command_logged = false;
         for _ in 0..10 {
             tokio::time::advance(Duration::from_millis(10)).await;
-            tokio::task::yield_now().await;
             if logs_contain(
                 "Received command for device SN1234, but controls are not enabled in config",
             ) {
