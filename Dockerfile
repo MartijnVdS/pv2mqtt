@@ -46,7 +46,7 @@ COPY --from=builder /usr/src/pv2mqtt/pv2mqtt /app/pv2mqtt
 RUN groupadd -r appgroup && useradd -r -g appgroup -G dialout -s /sbin/nologin appuser
 
 # Install root CA certificates
-RUN apt-get update && apt-get install -y ca-certificates
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 
 USER appuser
 
