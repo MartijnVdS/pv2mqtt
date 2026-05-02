@@ -2,9 +2,11 @@
 
 use crate::error::{Pv2MqttError, Result};
 use serde::Deserialize;
+use std::env;
 use std::fs;
 use std::net::SocketAddr;
 use std::path::Path;
+use tracing::warn;
 
 const MAX_POLL_SECS: u64 = 3600;
 const MAX_KEEPALIVE_SECS: u64 = 3600;
@@ -28,6 +30,63 @@ pub struct MqttConfig {
 }
 
 impl MqttConfig {
+    // Injects MQTT credentials from environment variables or files into the URL.
+    // This is called during configuration loading to support secure deployments.
+    pub fn inject_env_credentials(&mut self) -> Result<()> {
+        self.inject_env_credentials_internal(|key| env::var(key).ok())
+    }
+
+    // Internal implementation of credential injection.
+    // Uses a closure for variable resolution to allow unit testing without
+    // using `unsafe` functions like `std::env::set_var`.
+    fn inject_env_credentials_internal<F>(&mut self, get_var: F) -> Result<()>
+    where
+        F: Fn(&str) -> Option<String>,
+    {
+        let resolve_secret = |file_var: &str, direct_var: &str| -> Option<String> {
+            if let Some(file_path) = get_var(file_var) {
+                match fs::read_to_string(&file_path) {
+                    Ok(content) => Some(content.trim().to_string()),
+                    Err(_) => {
+                        warn!("{} is set but the file could not be read", file_var);
+                        None
+                    }
+                }
+            } else {
+                get_var(direct_var)
+            }
+        };
+
+        let env_user = resolve_secret("MQTT_USERNAME_FILE", "MQTT_USERNAME");
+        let env_pass = resolve_secret("MQTT_PASSWORD_FILE", "MQTT_PASSWORD");
+
+        if env_user.is_some() || env_pass.is_some() {
+            if let Ok(mut url) = url::Url::parse(&self.url) {
+                if (env_user.is_some() && !url.username().is_empty())
+                    || (env_pass.is_some() && url.password().is_some())
+                {
+                    warn!(
+                        "MQTT credentials in environment variables override those configured in the URL"
+                    );
+                }
+
+                if let Some(user) = env_user {
+                    let _ = url.set_username(&user);
+                }
+                if let Some(pass) = env_pass {
+                    let _ = url.set_password(Some(&pass));
+                }
+
+                self.url = url.to_string();
+            } else {
+                warn!(
+                    "MQTT URL could not be parsed while trying to inject environment credentials"
+                );
+            }
+        }
+        Ok(())
+    }
+
     pub fn masked_url(&self) -> String {
         match url::Url::parse(&self.url) {
             Ok(mut url) => {
@@ -111,8 +170,9 @@ impl Config {
         let content = fs::read_to_string(path_ref).map_err(|e| {
             Pv2MqttError::Config(format!("Failed to read config file {:?}: {}", path_ref, e))
         })?;
-        let config: Config = toml::from_str(&content)
+        let mut config: Config = toml::from_str(&content)
             .map_err(|e| Pv2MqttError::Config(format!("Failed to parse config TOML: {}", e)))?;
+        config.mqtt.inject_env_credentials()?;
         config.validate()?;
         Ok(config)
     }
@@ -690,5 +750,62 @@ mod tests {
         }
 
         let _ = fs::remove_file(config_path);
+    }
+
+    #[test]
+    fn test_mqtt_env_and_file_credentials() {
+        let mut mqtt = MqttConfig {
+            url: "mqtt://localhost:1883".to_string(),
+            client_id: "test".to_string(),
+            topic_prefix: "pv2mqtt".to_string(),
+            ha_prefix: "homeassistant".to_string(),
+            ca_path: None,
+            cert_path: None,
+            key_path: None,
+        };
+
+        // 1. Test basic environment variables
+        mqtt.inject_env_credentials_internal(|key| match key {
+            "MQTT_USERNAME" => Some("env_user".to_string()),
+            "MQTT_PASSWORD" => Some("env_pass".to_string()),
+            _ => None,
+        })
+        .unwrap();
+        assert_eq!(mqtt.url, "mqtt://env_user:env_pass@localhost:1883");
+
+        // Prepare files for file-based tests
+        let temp_dir = std::env::temp_dir();
+        let user_file = temp_dir.join("mqtt_user.txt");
+        let pass_file = temp_dir.join("mqtt_pass.txt");
+        fs::write(&user_file, "file_user\n").unwrap();
+        fs::write(&pass_file, "file_pass  ").unwrap();
+        let user_file_str = user_file.to_str().unwrap().to_string();
+        let pass_file_str = pass_file.to_str().unwrap().to_string();
+
+        // 2. Test file-based credentials
+        mqtt.url = "mqtt://localhost:1883".to_string();
+        mqtt.inject_env_credentials_internal(|key| match key {
+            "MQTT_USERNAME_FILE" => Some(user_file_str.clone()),
+            "MQTT_PASSWORD_FILE" => Some(pass_file_str.clone()),
+            _ => None,
+        })
+        .unwrap();
+        assert_eq!(mqtt.url, "mqtt://file_user:file_pass@localhost:1883");
+
+        // 3. Test file-based credentials taking precedence over regular variables
+        mqtt.url = "mqtt://localhost:1883".to_string();
+        mqtt.inject_env_credentials_internal(|key| match key {
+            "MQTT_USERNAME" => Some("env_user".to_string()),
+            "MQTT_PASSWORD" => Some("env_pass".to_string()),
+            "MQTT_USERNAME_FILE" => Some(user_file_str.clone()),
+            "MQTT_PASSWORD_FILE" => Some(pass_file_str.clone()),
+            _ => None,
+        })
+        .unwrap();
+        assert_eq!(mqtt.url, "mqtt://file_user:file_pass@localhost:1883");
+
+        // Cleanup
+        let _ = fs::remove_file(user_file);
+        let _ = fs::remove_file(pass_file);
     }
 }

@@ -31,6 +31,19 @@ The configuration file uses the [TOML](https://toml.io/) format and contains:
 * Devices: One or more SunSpec devices per Connection, each with its own
   Unit ID and polling interval.
 
+### Environment Variables and Secrets
+
+For secure deployments (e.g., Docker Secrets), you can provide MQTT credentials
+via environment variables. These will overwrite any credentials specified in the
+MQTT URL in the configuration file.
+
+* `MQTT_USERNAME`: MQTT username.
+* `MQTT_PASSWORD`: MQTT password.
+* `MQTT_USERNAME_FILE`: Path to a file containing the MQTT username.
+* `MQTT_PASSWORD_FILE`: Path to a file containing the MQTT password.
+
+File-based variables (`_FILE`) take precedence over direct environment variables.
+
 The example configuration file contains documentation in the form of comments.
 
 ## Building and Running
