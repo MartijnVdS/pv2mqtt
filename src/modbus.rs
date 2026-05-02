@@ -1125,6 +1125,7 @@ mod tests {
     use super::*;
     use std::sync::atomic::Ordering;
     use tokio::sync::mpsc;
+    use tracing_test::traced_test;
 
     fn test_task() -> ConnectionTask {
         let (tx, _) = mpsc::channel(1);
@@ -1150,6 +1151,41 @@ mod tests {
             root_cert_store,
             cmd_rx,
         }
+    }
+
+    fn setup_mock_sunspec_registers(r: &mut [u16]) -> usize {
+        r[40000] = 0x5375; // 'Su'
+        r[40001] = 0x6e53; // 'nS'
+
+        // Model 1 (Common)
+        r[40002] = 1; // Model ID
+        r[40003] = 66; // Length
+        // Pre-fill with spaces
+        for i in 0..66 {
+            r[40004 + i] = 0x2020;
+        }
+        // Manufacturer (Mn) starts at offset 0 of Model 1 data (r[40004])
+        r[40004] = 0x4272; // 'Br'
+        r[40005] = 0x616e; // 'an'
+        r[40006] = 0x6420; // 'd '
+        // Model (Md) starts at offset 16 of Model 1 data (r[40004+16=40020])
+        r[40020] = 0x4d6f; // 'Mo'
+        r[40021] = 0x6465; // 'de'
+        r[40022] = 0x6c20; // 'l '
+        // Serial number (SN) starts at offset 50 (40004 + 50 = 40054)
+        r[40054] = 0x534e; // 'SN'
+        r[40055] = 0x3132; // '12'
+        r[40056] = 0x3334; // '34'
+
+        // Model 103 (Three Phase Inverter) at 40070 (40002 + 66 + 2)
+        r[40070] = 103; // Model ID
+        r[40071] = 50; // Length
+        let m103_base = 40072;
+        r[m103_base + 12] = 1000;
+        r[m103_base + 13] = 0;
+
+        // Return the address for the next model (40070 + 50 + 2)
+        40122
     }
 
     #[test]
@@ -1224,6 +1260,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[traced_test]
     async fn test_reconnection_logic() {
         // Use tokio::time::pause() to advance time and skip the "real" timeout
         tokio::time::pause();
@@ -1282,7 +1319,11 @@ mod tests {
     }
 
     #[tokio::test]
+    #[traced_test]
     async fn test_successful_poll_logic() {
+        // Use tokio time travel
+        tokio::time::pause();
+
         let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
         let handle_mock = modbus_test_utils::start_mock_server(addr).await;
         let addr_str = handle_mock.addr.to_string();
@@ -1291,44 +1332,14 @@ mod tests {
         // Setup SunSpec discovery registers
         {
             let mut r = regs.lock().unwrap();
-            r[40000] = 0x5375; // 'Su'
-            r[40001] = 0x6e53; // 'nS'
+            let next_addr = setup_mock_sunspec_registers(&mut r);
 
-            // Model 1 (Common)
-            r[40002] = 1; // Model ID
-            r[40003] = 66; // Length
-            // Pre-fill with spaces
-            for i in 0..66 {
-                r[40004 + i] = 0x2020;
-            }
-            // Manufacturer (Mn) starts at offset 0 of Model 1 data (r[40004])
-            r[40004] = 0x4272; // 'Br'
-            r[40005] = 0x616e; // 'an'
-            r[40006] = 0x6420; // 'd '
-            // Model (Md) starts at offset 16 of Model 1 data (r[40004+16=40020])
-            r[40020] = 0x4d6f; // 'Mo'
-            r[40021] = 0x6465; // 'de'
-            r[40022] = 0x6c20; // 'l '
-            // Serial number (SN) starts at offset 50 (40004 + 50 = 40054)
-            r[40054] = 0x534e; // 'SN'
-            r[40055] = 0x3132; // '12'
-            r[40056] = 0x3334; // '34'
-
-            // Model 103 (Three Phase Inverter) at 40070 (40002 + 66 + 2)
-            r[40070] = 103; // Model ID
-            r[40071] = 50; // Length
-            let base = 40072;
-
-            // W at offset 12, W_SF at offset 13
-            r[base + 12] = 1000;
-            r[base + 13] = 0; // SF = 0
-
-            // St at offset 36
-            r[base + 36] = 1; // OFF
+            // St at offset 36 of Model 103
+            r[40072 + 36] = 1; // OFF
 
             // End of models marker
-            r[base + 50] = 0xFFFF;
-            r[base + 51] = 0;
+            r[next_addr] = 0xFFFF;
+            r[next_addr + 1] = 0;
         }
 
         let (tx, mut rx) = mpsc::channel(100);
@@ -1364,32 +1375,23 @@ mod tests {
         let token_clone = token.clone();
         let task_handle = tokio::spawn(async move { task.run_internal().await });
 
-        // Wait for the mock server to signal a connection
-        handle_mock.notify.notified().await;
-
-        // Collect messages
+        // Collect messages by advancing time in small increments
         let mut messages = Vec::new();
-
-        // Wait for all 12 discovery messages with a generous timeout per message
-        for _ in 0..12 {
-            match tokio::time::timeout(Duration::from_secs(5), rx.recv()).await {
-                Ok(Some(msg)) => messages.push(msg),
-                Ok(None) => panic!("Channel closed early (got {})", messages.len()),
-                Err(_) => panic!("Timeout waiting for discovery message {}", messages.len()),
+        // Discovery (12) + at least one poll (2: Data + Status) = 14 messages
+        let mut timeout_counter = 0;
+        while messages.len() < 14 && timeout_counter < 500 {
+            tokio::time::advance(Duration::from_millis(10)).await;
+            while let Ok(msg) = rx.try_recv() {
+                messages.push(msg);
             }
+            timeout_counter += 1;
         }
 
-        // Wait for next poll (Data + Status)
-        // This will naturally wait for the 1s interval to pass in the background task
-        for _ in 0..2 {
-            match tokio::time::timeout(Duration::from_secs(5), rx.recv()).await {
-                Ok(Some(msg)) => messages.push(msg),
-                Ok(None) => panic!("Channel closed early during polling"),
-                Err(_) => panic!("Timeout waiting for poll message"),
-            }
-        }
-
-        assert!(!messages.is_empty(), "Should have received MQTT messages");
+        assert!(
+            messages.len() >= 14,
+            "Should have received at least 14 MQTT messages, got {}",
+            messages.len()
+        );
 
         // We expect discovery messages (12) + at least one poll (Data + Status)
         // Discovery messages have topics starting with homeassistant/
@@ -1453,6 +1455,107 @@ mod tests {
         assert_eq!(json["status"], "OK");
 
         token_clone.cancel();
+        let _ = task_handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    #[traced_test]
+    async fn test_command_execution_logic() {
+        // Use tokio time travel for deterministic command execution
+        tokio::time::pause();
+
+        let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let handle_mock = modbus_test_utils::start_mock_server(addr).await;
+        let addr_str = handle_mock.addr.to_string();
+        let regs = handle_mock.registers;
+
+        // Setup SunSpec discovery registers
+        {
+            let mut r = regs.lock().unwrap();
+            let next_addr = setup_mock_sunspec_registers(&mut r);
+
+            // Model 123 (Immediate Controls)
+            r[next_addr] = 123; // Model ID
+            r[next_addr + 1] = 24; // Length
+            let base = next_addr + 2;
+            r[base + 23] = 0xFFFE; // SF = -2 (as i16)
+
+            // End of models marker
+            r[base + 24] = 0xFFFF;
+            r[base + 25] = 0;
+        }
+
+        let (tx, mut rx) = mpsc::channel(100);
+        let token = CancellationToken::new();
+        let root_cert_store = Arc::new(rustls::RootCertStore::empty());
+
+        let (cmd_tx, cmd_rx) = tokio::sync::broadcast::channel(1);
+        let task = ConnectionTask {
+            config: ConnectionConfig {
+                name: "test".to_string(),
+                modbus: ModbusConfig::Tcp {
+                    address: addr_str,
+                    tls: false,
+                    ca_path: None,
+                    cert_path: None,
+                    key_path: None,
+                },
+                devices: vec![DeviceConfig {
+                    unit_id: 1,
+                    interval: 60,
+                    enable_controls: true, // MUST be true
+                }],
+                keep_alive_interval: None,
+            },
+            mqtt_tx: tx,
+            topic_prefix: "solar".to_string(),
+            ha_prefix: "homeassistant".to_string(),
+            token: token.clone(),
+            root_cert_store,
+            cmd_rx,
+        };
+
+        let token_clone = token.clone();
+        let task_handle = tokio::spawn(async move { task.run_internal().await });
+
+        // Discovery message is published after successful poll
+        // We advance time to trigger the poll interval.
+        let mut discovery_msg = None;
+        let mut timeout_counter = 0;
+        while discovery_msg.is_none() && timeout_counter < 500 {
+            tokio::time::advance(Duration::from_millis(10)).await;
+            if let Ok(msg) = rx.try_recv() {
+                discovery_msg = Some(msg);
+                break;
+            }
+            timeout_counter += 1;
+        }
+        discovery_msg.expect("Did not receive discovery message within timeout");
+
+        // Send a command
+        let cmd = crate::commands::ModbusCommand {
+            serial: "SN1234".to_string(),
+            action: crate::commands::ControlAction::WMaxLimPct(75.5),
+        };
+        cmd_tx.send(cmd).unwrap();
+
+        // Advance time just enough to trigger the select! branch for cmd_rx.recv()
+        // and allow handle_command to finish. We use a loop to ensure tasks run.
+        let mut write_verified = false;
+        for _ in 0..10 {
+            tokio::time::advance(Duration::from_millis(10)).await;
+            let r = regs.lock().unwrap();
+            let base = 40124;
+            if r[base + 3] == 7550 {
+                write_verified = true;
+                break;
+            }
+        }
+        assert!(write_verified, "Register write did not occur");
+
+        token_clone.cancel();
+        // Advance time to allow the cancellation to propagate and loop to exit
+        tokio::time::advance(Duration::from_millis(100)).await;
         let _ = task_handle.await.unwrap();
     }
 }

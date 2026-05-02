@@ -37,6 +37,21 @@ impl tokio_modbus::server::Service for MockService {
                     std::future::ready(Err(ExceptionCode::IllegalDataAddress))
                 }
             }
+            Request::WriteMultipleRegisters(addr, vals) => {
+                let mut regs = self.registers.lock().unwrap();
+                let end = (addr as usize) + vals.len();
+                if end <= regs.len() {
+                    for (i, &val) in vals.iter().enumerate() {
+                        regs[(addr as usize) + i] = val;
+                    }
+                    std::future::ready(Ok(Response::WriteMultipleRegisters(
+                        addr,
+                        vals.len() as u16,
+                    )))
+                } else {
+                    std::future::ready(Err(ExceptionCode::IllegalDataAddress))
+                }
+            }
             _ => std::future::ready(Err(ExceptionCode::IllegalFunction)),
         }
     }

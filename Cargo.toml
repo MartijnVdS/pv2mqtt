@@ -40,8 +40,8 @@ toml = "1.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 chrono = { version = "0.4", features = ["serde"] }
-url = "2.5.8"
-thiserror = "2.0.18"
+url = "2.5"
+thiserror = "2.0"
 
 [profile.release]
 lto = true
@@ -49,6 +49,7 @@ codegen-units = 1
 strip = "debuginfo"
 
 [dev-dependencies]
-approx = "0.5.1"
+approx = "0.5"
 tokio = { version = "1", features = [ "test-util" ] }
 tokio-modbus = { version = "0.17", features = [ "server", "tcp-server" ] }
+tracing-test = "0.2"

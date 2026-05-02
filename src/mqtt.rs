@@ -243,8 +243,10 @@ impl MqttTask {
 mod tests {
     use super::*;
     use crate::config::MqttConfig;
+    use tracing_test::traced_test;
 
     #[tokio::test]
+    #[traced_test]
     async fn test_mqtt_task_shutdown() {
         let (tx, rx) = mpsc::channel(1);
         let config = MqttConfig {
