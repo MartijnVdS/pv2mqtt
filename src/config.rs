@@ -95,6 +95,8 @@ pub struct DeviceConfig {
     pub unit_id: u8,
     #[serde(default = "default_polling_interval")]
     pub interval: u64,
+    #[serde(default)]
+    pub enable_controls: bool,
 }
 
 fn default_polling_interval() -> u64 {
@@ -287,6 +289,7 @@ mod tests {
                 devices: vec![DeviceConfig {
                     unit_id: 1,
                     interval: 10,
+                    enable_controls: false,
                 }],
                 keep_alive_interval: None,
             }],
@@ -326,6 +329,7 @@ mod tests {
                 devices: vec![DeviceConfig {
                     unit_id: 1,
                     interval: 10,
+                    enable_controls: false,
                 }],
                 keep_alive_interval: None,
             }],
@@ -398,10 +402,12 @@ mod tests {
                     DeviceConfig {
                         unit_id: 1,
                         interval: 10,
+                        enable_controls: false,
                     },
                     DeviceConfig {
                         unit_id: 1,
                         interval: 10,
+                        enable_controls: false,
                     },
                 ],
                 keep_alive_interval: None,
@@ -432,6 +438,7 @@ mod tests {
                 devices: vec![DeviceConfig {
                     unit_id: 248, // Out of range
                     interval: 10,
+                    enable_controls: false,
                 }],
                 keep_alive_interval: None,
             }],
@@ -466,6 +473,7 @@ mod tests {
                 devices: vec![DeviceConfig {
                     unit_id: 1,
                     interval: 4000, // Too large
+                    enable_controls: false,
                 }],
                 keep_alive_interval: None,
             }],
@@ -500,6 +508,7 @@ mod tests {
                 devices: vec![DeviceConfig {
                     unit_id: 1,
                     interval: 10,
+                    enable_controls: false,
                 }],
                 keep_alive_interval: None,
             }],

@@ -4,14 +4,43 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use sunspec::models::{
     model101::Model101, model102::Model102, model103::Model103, model111::Model111,
-    model112::Model112, model113::Model113,
+    model112::Model112, model113::Model113, model123::Model123,
 };
 
-pub static SUPPORTED_MODELS: &[u16] = &[101, 102, 103, 111, 112, 113];
+pub static SUPPORTED_MODELS: &[u16] = &[101, 102, 103, 111, 112, 113, 123];
 
 const SUNSPEC_UNIMPLEMENTED_U32: u32 = 0xFFFFFFFF;
 const SUNSPEC_UNIMPLEMENTED_U16: u16 = 0xFFFF;
 const SUNSPEC_UNIMPLEMENTED_I16: i16 = -32768;
+
+#[derive(Debug, Serialize, Default, Clone)]
+pub struct Model123Data {
+    #[serde(rename = "Conn")]
+    pub conn: Option<bool>,
+    #[serde(rename = "WMaxLimPct")]
+    pub w_max_lim_pct: Option<f32>,
+    #[serde(rename = "WMaxLim_Ena")]
+    pub w_max_lim_ena: Option<bool>,
+}
+
+impl From<Model123> for Model123Data {
+    fn from(m: Model123) -> Self {
+        use sunspec::models::model123::{Conn, WMaxLimEna};
+        Self {
+            conn: match m.conn {
+                Conn::Disconnect => Some(false),
+                Conn::Connect => Some(true),
+                _ => None,
+            },
+            w_max_lim_pct: apply_sf(m.w_max_lim_pct, m.w_max_lim_pct_sf),
+            w_max_lim_ena: match m.w_max_lim_ena {
+                WMaxLimEna::Disabled => Some(false),
+                WMaxLimEna::Enabled => Some(true),
+                _ => None,
+            },
+        }
+    }
+}
 
 #[derive(Debug, Serialize, Default, Clone)]
 pub struct InverterData {
@@ -50,6 +79,8 @@ pub struct InverterData {
     pub tmp_ot: Option<f32>,
     #[serde(rename = "St")]
     pub st: String,
+    #[serde(rename = "Controls", skip_serializing_if = "Option::is_none")]
+    pub controls: Option<Model123Data>,
 }
 
 fn apply_sf(val: u16, sf: i16) -> Option<f32> {
@@ -164,6 +195,7 @@ macro_rules! impl_int_model {
                     tmp_snk: apply_sf_i16_opt(m.tmp_snk, Some(m.tmp_sf)),
                     tmp_trns: apply_sf_i16_opt(m.tmp_trns, Some(m.tmp_sf)),
                     tmp_ot: apply_sf_i16_opt(m.tmp_ot, Some(m.tmp_sf)),
+                    controls: None,
                 }
             }
         }
@@ -193,6 +225,7 @@ macro_rules! impl_float_model {
                     tmp_snk: m.tmp_snk,
                     tmp_trns: m.tmp_trns,
                     tmp_ot: m.tmp_ot,
+                    controls: None,
                 }
             }
         }

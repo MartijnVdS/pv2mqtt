@@ -75,6 +75,12 @@ Note: If no `config_file` is specified, `pv2mqtt` defaults to `/etc/pv2mqtt.toml
 - Use TLS/mTLS: Always enable TLS for MQTT and Modbus-TCP when supported.
   `pv2mqtt` supports Mutual TLS (mTLS) for both by providing `cert_path` and
   `key_path` in the configuration.
+- TLS Certificate Verification: `pv2mqtt` uses the system's root certificate
+  store to verify server certificates. If you are using **self-signed
+  certificates**, the CA certificate must be installed in the system trust store
+  of the machine (or container) running `pv2mqtt`. There is currently no option
+   to skip certificate verification or provide a custom CA bundle directly in the
+  config.
 - Network Isolation: Isolate your inverters and the machine running `pv2mqtt`
   on a trusted, monitored network segment.
 - Principle of Least Privilege: Run `pv2mqtt` with the minimum necessary

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+mod commands;
 mod config;
 mod error;
 mod modbus;
@@ -7,6 +8,7 @@ mod models;
 mod mqtt;
 mod tls;
 
+use crate::commands::ModbusCommand;
 use crate::config::Config;
 use crate::error::{Pv2MqttError, Result};
 use crate::modbus::ConnectionTask;
@@ -80,13 +82,15 @@ async fn main() -> Result<()> {
     };
 
     let (mqtt_tx, mqtt_rx) = mpsc::channel::<MqttMessage>(100);
+    let (cmd_tx, _) = tokio::sync::broadcast::channel::<ModbusCommand>(32);
     let shutdown_token = CancellationToken::new();
 
     // Spawn MQTT task
     let mqtt_config = config.mqtt.clone();
     let mqtt_certs = Arc::clone(&root_cert_store);
+    let mqtt_cmd_tx = cmd_tx.clone();
     let mqtt_handle = tokio::spawn(async move {
-        let task = MqttTask::new(mqtt_config, mqtt_rx, mqtt_certs);
+        let task = MqttTask::new(mqtt_config, mqtt_rx, mqtt_certs, mqtt_cmd_tx);
         match task.run().await {
             Ok(_) => info!("MQTT task finished cleanly"),
             Err(e) => error!("MQTT task failed: {}", e),
@@ -103,6 +107,7 @@ async fn main() -> Result<()> {
         let ha_prefix = config.mqtt.ha_prefix.clone();
         let token = shutdown_token.clone();
         let conn_certs = Arc::clone(&root_cert_store);
+        let cmd_rx = cmd_tx.subscribe();
 
         let handle = tokio::spawn(async move {
             let task = ConnectionTask::new(
@@ -112,6 +117,7 @@ async fn main() -> Result<()> {
                 ha_prefix,
                 token,
                 conn_certs,
+                cmd_rx,
             );
 
             if let Err(e) = task.run().await {

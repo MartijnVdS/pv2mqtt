@@ -16,7 +16,7 @@ use sunspec::models::{
 use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 use tokio_modbus::Slave;
-use tokio_modbus::client::{Context as ModbusContext, Reader, rtu, tcp};
+use tokio_modbus::client::{Context as ModbusContext, Reader, Writer, rtu, tcp};
 use tokio_modbus::slave::SlaveContext;
 use tokio_rustls::TlsConnector;
 use tokio_rustls::rustls::pki_types::ServerName;
@@ -30,6 +30,9 @@ const RECONNECT_TIMEOUT_SECS: u64 = 10;
 const READ_TIMEOUT_SECS: u64 = 10;
 const POLL_TIMEOUT_SECS: u64 = 10;
 
+const DEFAULT_IDLE_SLEEP_SECS: u64 = 3600;
+const MIN_SLEEP_MILLIS: u64 = 10;
+
 pub struct ConnectionTask {
     config: ConnectionConfig,
     mqtt_tx: mpsc::Sender<MqttMessage>,
@@ -37,6 +40,7 @@ pub struct ConnectionTask {
     ha_prefix: String,
     token: CancellationToken,
     root_cert_store: Arc<rustls::RootCertStore>,
+    cmd_rx: tokio::sync::broadcast::Receiver<crate::commands::ModbusCommand>,
 }
 
 struct DeviceState {
@@ -65,6 +69,7 @@ impl ConnectionTask {
         ha_prefix: String,
         token: CancellationToken,
         root_cert_store: Arc<rustls::RootCertStore>,
+        cmd_rx: tokio::sync::broadcast::Receiver<crate::commands::ModbusCommand>,
     ) -> Self {
         Self {
             config,
@@ -73,6 +78,7 @@ impl ConnectionTask {
             ha_prefix,
             token,
             root_cert_store,
+            cmd_rx,
         }
     }
 
@@ -119,7 +125,8 @@ impl ConnectionTask {
                 let ctx = self.establish_connection().await?;
                 let ctx = Arc::new(Mutex::new(ctx));
 
-                self.run_polling_loop(ctx, &mut devices).await?;
+                self.run_polling_loop(ctx, &mut devices, self.cmd_rx.resubscribe())
+                    .await?;
                 Ok(())
             }
             .await;
@@ -153,9 +160,10 @@ impl ConnectionTask {
         &self,
         ctx: Arc<Mutex<ModbusContext>>,
         devices: &mut [DeviceState],
+        mut cmd_rx: tokio::sync::broadcast::Receiver<crate::commands::ModbusCommand>,
     ) -> Result<()> {
         let client = AsyncClient::new(
-            ctx,
+            ctx.clone(),
             SunSpecConfig {
                 // Disable read timeout in the SunSpec library
                 // We have our own timeout for a poll cycle
@@ -180,7 +188,7 @@ impl ConnectionTask {
                 if keep_alive_interval > 0 && devices.iter().any(|d| d.device.is_some()) {
                     last_activity + keep_alive_duration
                 } else {
-                    now + Duration::from_secs(3600) // Default large sleep
+                    now + Duration::from_secs(DEFAULT_IDLE_SLEEP_SECS) // Default large sleep
                 };
 
             for device_state in devices.iter() {
@@ -196,7 +204,7 @@ impl ConnectionTask {
 
             let sleep_duration = next_wakeup
                 .saturating_duration_since(Instant::now())
-                .max(Duration::from_millis(10));
+                .max(Duration::from_millis(MIN_SLEEP_MILLIS));
 
             trace!("Sleeping for {:?}", sleep_duration);
 
@@ -205,6 +213,14 @@ impl ConnectionTask {
                 _ = self.token.cancelled() => {
                     trace!("Cancelled");
                     return Ok(());
+                }
+                res = cmd_rx.recv() => {
+                    if let Ok(ref cmd) = res {
+                         self.handle_command(&ctx, devices, cmd.clone()).await;
+                    }
+                    if res.is_ok() {
+                        continue;
+                    }
                 }
             }
 
@@ -226,7 +242,7 @@ impl ConnectionTask {
                         let addr = device.models.m1.addr;
                         let mut ctx = device.client.lock().await;
                         ctx.set_slave(Slave(device.slave_id));
-                        let _ = tokio::time::timeout(
+                        let regs_res = tokio::time::timeout(
                             Duration::from_secs(READ_TIMEOUT_SECS),
                             ctx.read_holding_registers(addr, 2),
                         )
@@ -236,7 +252,12 @@ impl ConnectionTask {
                                 "Keep-alive timeout for unit {}",
                                 device.slave_id
                             ))
-                        })??;
+                        })??; // Timeout and Modbus error handled
+
+                        // Handle potential ExceptionCode
+                        let _ = regs_res.map_err(|e| {
+                            ModbusError::Protocol(format!("Keep-alive exception: {}", e))
+                        })?;
 
                         Ok(())
                     }
@@ -346,6 +367,14 @@ impl ConnectionTask {
                     "No supported inverter model found. Available: {}",
                     available
                 )));
+            }
+
+            // Check if controls are enabled but not supported by hardware
+            if device_state.config.enable_controls && !available_models.contains(&123) {
+                warn!(
+                    "Device {} has controls enabled in config, but Model 123 is not supported by hardware. Available models: {:?}",
+                    unit_id, available_models
+                );
             }
 
             // Try to read Model 1 for metadata/serial
@@ -507,6 +536,128 @@ impl ConnectionTask {
         }
     }
 
+    async fn handle_command(
+        &self,
+        ctx: &Arc<Mutex<ModbusContext>>,
+        devices: &mut [DeviceState],
+        cmd: crate::commands::ModbusCommand,
+    ) {
+        // Find if this command is for one of our devices
+        let device_state = match devices
+            .iter_mut()
+            .find(|d| d.serial.as_ref() == Some(&cmd.serial))
+        {
+            Some(d) => d,
+            None => return, // Not for us
+        };
+
+        if !device_state.config.enable_controls {
+            warn!(
+                "Received command for device {}, but controls are not enabled in config",
+                cmd.serial
+            );
+            return;
+        }
+
+        let device = match &device_state.device {
+            Some(d) => d,
+            None => {
+                warn!(
+                    "Received command for device {}, but it is not currently connected",
+                    cmd.serial
+                );
+                return;
+            }
+        };
+
+        let unit_id = device_state.config.unit_id;
+        let action = cmd.action;
+
+        info!("Executing command for unit {}: {:?}", unit_id, action);
+
+        let res: Result<()> = async {
+            use crate::commands::ControlAction;
+
+            if device.models.m123.addr == 0 {
+                return Err(Pv2MqttError::Modbus(ModbusError::from(
+                    std::io::Error::other("Model 123 not supported by device"),
+                )));
+            }
+
+            let base_addr = device.models.m123.addr;
+            let mut modbus = ctx.lock().await;
+            modbus.set_slave(Slave(unit_id));
+
+            match action {
+                ControlAction::Conn(connect) => {
+                    // Conn is at offset 2 (relative to Model 123 base)
+                    let val = if connect { 1 } else { 0 };
+                    let _ = modbus
+                        .write_multiple_registers(base_addr + 2, &[val])
+                        .await
+                        .map_err(ModbusError::from)?
+                        .map_err(|e| {
+                            ModbusError::Protocol(format!("Modbus exception writing Conn: {}", e))
+                        })?;
+                }
+                ControlAction::WMaxLimPct(pct) => {
+                    // Read WMaxLimPct_SF (offset 23) first
+                    let regs = modbus
+                        .read_holding_registers(base_addr + 23, 1)
+                        .await
+                        .map_err(ModbusError::from)?
+                        .map_err(|e| {
+                            ModbusError::Protocol(format!("Modbus exception reading SF: {}", e))
+                        })?;
+                    let sf = regs[0] as i16;
+
+                    // Calculate raw value: raw = pct / 10^sf
+                    // For example: pct = 75.5, sf = -2 -> raw = 75.5 / 0.01 = 7550
+                    let factor = 10f32.powi(sf as i32);
+                    let raw = (pct / factor).round() as u16;
+
+                    // WMaxLimPct is at offset 3
+                    let _ = modbus
+                        .write_multiple_registers(base_addr + 3, &[raw])
+                        .await
+                        .map_err(ModbusError::from)?
+                        .map_err(|e| {
+                            ModbusError::Protocol(format!(
+                                "Modbus exception writing WMaxLimPct: {}",
+                                e
+                            ))
+                        })?;
+                }
+                ControlAction::WMaxLimEna(enable) => {
+                    // WMaxLim_Ena is at offset 4
+                    let val = if enable { 1 } else { 0 };
+                    let _ = modbus
+                        .write_multiple_registers(base_addr + 4, &[val])
+                        .await
+                        .map_err(ModbusError::from)?
+                        .map_err(|e| {
+                            ModbusError::Protocol(format!(
+                                "Modbus exception writing WMaxLim_Ena: {}",
+                                e
+                            ))
+                        })?;
+                }
+            }
+            Ok(())
+        }
+        .await;
+
+        if let Err(e) = res {
+            error!("Failed to execute command for {}: {}", cmd.serial, e);
+        } else {
+            info!(
+                "Successfully executed command for {}. Triggering immediate poll.",
+                cmd.serial
+            );
+            device_state.last_poll = None;
+        }
+    }
+
     async fn perform_device_poll(
         &self,
         device_state: &mut DeviceState,
@@ -536,8 +687,19 @@ impl ConnectionTask {
             .await;
 
             match poll_result {
-                Ok(Ok(data)) => {
+                Ok(Ok(mut data)) => {
                     info!("Successfully polled (Serial: {})", serial);
+
+                    // Optionally poll Model 123 for controls status
+                    if device_state.config.enable_controls {
+                        match self.poll_model123(device).await {
+                            Ok(c) => data.controls = Some(c),
+                            Err(e) => {
+                                warn!("Failed to poll controls (Model 123) for {}: {}", serial, e);
+                            }
+                        }
+                    }
+
                     device_state.last_success_timestamp = Some(Utc::now());
                     let payload = serde_json::to_string(&data)?;
                     let topic = self.inverter_topic(serial);
@@ -677,6 +839,17 @@ impl ConnectionTask {
         }
     }
 
+    async fn poll_model123(
+        &self,
+        device: &AsyncDevice<Arc<Mutex<ModbusContext>>>,
+    ) -> Result<crate::models::Model123Data> {
+        let m123 = device
+            .read_model::<sunspec::models::model123::Model123>()
+            .await
+            .map_err(Pv2MqttError::from)?;
+        Ok(m123.into())
+    }
+
     async fn publish_discovery(
         &self,
         serial: &str,
@@ -800,6 +973,8 @@ impl ConnectionTask {
                 label,
                 enabled_by_default,
                 options,
+                component: None,
+                command_topic: None,
             };
             let (topic, payload) = self.discovery_message(serial, &ctx);
             self.mqtt_tx
@@ -811,11 +986,76 @@ impl ConnectionTask {
                 .await?;
         }
 
+        // Add control entities if Model 123 is enabled
+        if let Some(id) = model_id
+            && id == 123
+        {
+            let controls = vec![
+                (
+                    "Conn",
+                    "switch",
+                    None,
+                    None,
+                    "Connection",
+                    format!("{}/inverter/{}/set/Conn", self.topic_prefix, serial),
+                ),
+                (
+                    "WMaxLimPct",
+                    "number",
+                    Some("power_factor"),
+                    None,
+                    "Active Power Limit",
+                    format!("{}/inverter/{}/set/WMaxLimPct", self.topic_prefix, serial),
+                ),
+                (
+                    "WMaxLim_Ena",
+                    "switch",
+                    None,
+                    None,
+                    "Active Power Limit Enable",
+                    format!("{}/inverter/{}/set/WMaxLim_Ena", self.topic_prefix, serial),
+                ),
+            ];
+
+            for (name, component, device_class, state_class, label, cmd_topic) in controls {
+                let ctx = DiscoveryContext {
+                    manufacturer,
+                    model,
+                    version,
+                    name,
+                    unit: if name == "WMaxLimPct" {
+                        Some("%")
+                    } else {
+                        None
+                    },
+                    device_class,
+                    state_class,
+                    label,
+                    enabled_by_default: true,
+                    options: None,
+                    component: Some(component),
+                    command_topic: Some(cmd_topic),
+                };
+                let (topic, payload) = self.discovery_message(serial, &ctx);
+                self.mqtt_tx
+                    .send(MqttMessage::Publish {
+                        topic,
+                        payload,
+                        retain: true,
+                    })
+                    .await?;
+            }
+        }
+
         Ok(())
     }
 
     fn discovery_message(&self, serial: &str, ctx: &DiscoveryContext) -> (String, String) {
-        let topic = format!("{}/sensor/{}/{}/config", self.ha_prefix, serial, ctx.name);
+        let component = ctx.component.unwrap_or("sensor");
+        let topic = format!(
+            "{}/{}/{}/{}/config",
+            self.ha_prefix, component, serial, ctx.name
+        );
         let mut payload = serde_json::json!({
             "name": ctx.label,
             "state_topic": self.inverter_topic(serial),
@@ -830,6 +1070,15 @@ impl ConnectionTask {
                 "model": ctx.model,
             }
         });
+
+        if let Some(cmd_topic) = &ctx.command_topic {
+            payload["command_topic"] = serde_json::json!(cmd_topic);
+        }
+
+        if component == "switch" {
+            payload["payload_on"] = serde_json::json!(true);
+            payload["payload_off"] = serde_json::json!(false);
+        }
 
         if let Some(v) = ctx.version {
             payload["device"]["sw_version"] = serde_json::json!(v);
@@ -863,6 +1112,8 @@ struct DiscoveryContext<'a> {
     label: &'a str,
     enabled_by_default: bool,
     options: Option<Vec<&'static str>>,
+    component: Option<&'static str>,
+    command_topic: Option<String>,
 }
 
 #[cfg(test)]
@@ -876,6 +1127,7 @@ mod tests {
     fn test_task() -> ConnectionTask {
         let (tx, _) = mpsc::channel(1);
         let root_cert_store = Arc::new(rustls::RootCertStore::empty());
+        let (_, cmd_rx) = tokio::sync::broadcast::channel(1);
         ConnectionTask {
             config: ConnectionConfig {
                 name: "test".to_string(),
@@ -893,6 +1145,7 @@ mod tests {
             ha_prefix: "homeassistant".to_string(),
             token: CancellationToken::new(),
             root_cert_store,
+            cmd_rx,
         }
     }
 
@@ -924,6 +1177,8 @@ mod tests {
             label: "Power",
             enabled_by_default: true,
             options: None,
+            component: None,
+            command_topic: None,
         };
         let (topic, payload) = task.discovery_message("SN123", &ctx);
 
@@ -952,6 +1207,8 @@ mod tests {
             label: "Status",
             enabled_by_default: true,
             options: Some(vec!["OFF", "ON"]),
+            component: None,
+            command_topic: None,
         };
         let (topic, payload) = task.discovery_message("SN123", &ctx);
 
@@ -976,6 +1233,7 @@ mod tests {
         let token = CancellationToken::new();
         let root_cert_store = Arc::new(rustls::RootCertStore::empty());
 
+        let (_, cmd_rx) = tokio::sync::broadcast::channel(1);
         let task = ConnectionTask {
             config: ConnectionConfig {
                 name: "test".to_string(),
@@ -988,6 +1246,7 @@ mod tests {
                 devices: vec![DeviceConfig {
                     unit_id: 1,
                     interval: 10,
+                    enable_controls: false,
                 }],
                 keep_alive_interval: None,
             },
@@ -996,6 +1255,7 @@ mod tests {
             ha_prefix: "homeassistant".to_string(),
             token: token.clone(),
             root_cert_store,
+            cmd_rx,
         };
 
         let token_clone = token.clone();
@@ -1071,6 +1331,7 @@ mod tests {
         let token = CancellationToken::new();
         let root_cert_store = Arc::new(rustls::RootCertStore::empty());
 
+        let (_, cmd_rx) = tokio::sync::broadcast::channel(1);
         let task = ConnectionTask {
             config: ConnectionConfig {
                 name: "test".to_string(),
@@ -1083,6 +1344,7 @@ mod tests {
                 devices: vec![DeviceConfig {
                     unit_id: 1,
                     interval: 1,
+                    enable_controls: false,
                 }], // Short interval
                 keep_alive_interval: None,
             },
@@ -1091,6 +1353,7 @@ mod tests {
             ha_prefix: "homeassistant".to_string(),
             token: token.clone(),
             root_cert_store,
+            cmd_rx,
         };
 
         let token_clone = token.clone();
