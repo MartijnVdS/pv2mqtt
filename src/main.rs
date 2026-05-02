@@ -38,7 +38,7 @@ async fn main() -> Result<()> {
         .init();
 
     // Install default crypto provider for rustls
-    rustls::crypto::ring::default_provider()
+    rustls::crypto::aws_lc_rs::default_provider()
         .install_default()
         .ok();
 
