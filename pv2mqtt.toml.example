@@ -4,7 +4,10 @@
 [mqtt]
 # The URL of the MQTT broker. 
 # Supports mqtt:// (unencrypted), mqtts:// or ssl:// (TLS encrypted).
+#
 url = "mqtt://localhost:1883"
+# Example with username and password:
+#url = "mqtt://username:password@localhost:1883"
 
 # Unique identifier for this MQTT client.
 client_id = "pv2mqtt"
@@ -48,12 +51,6 @@ address = "192.0.2.10:502"
 # cert_path = "/etc/pv2mqtt/certs/modbus-client.crt"
 # key_path = "/etc/pv2mqtt/certs/modbus-client.key"
 
-# RTU (Serial) connection settings example:
-# type = "rtu"
-# device = "/dev/ttyUSB0"
-# baud_rate = 9600
-# parity = "none" # options: none, even, odd (default: none)
-
 # List of SunSpec devices on this Modbus connection
 [[connections.devices]]
 # Modbus Unit ID (Slave ID) of the device (1-247).
@@ -64,3 +61,15 @@ unit_id = 1
 # Note: Low intervals (< 5s) can cause hardware lockups on some legacy inverters
 # and excessive load on the MQTT broker.
 interval = 30
+
+# Example for Modbus-RTU (Serial, RS-485):
+#
+#[connections.modbus]
+#type = "rtu"
+#device = "/dev/ttyUSB0"
+#baud_rate = 9600
+#parity = "none" # options: none, even, odd (default: none)
+#
+#[[connections.devices]]
+#unit_id = 1
+##interval = 60
