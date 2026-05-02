@@ -1192,6 +1192,7 @@ mod tests {
     }
 
     #[test]
+    #[traced_test]
     fn test_topics() {
         let task = test_task();
         assert_eq!(task.inverter_topic("SN123"), "solar/inverter/SN123");
@@ -1206,6 +1207,7 @@ mod tests {
     }
 
     #[test]
+    #[traced_test]
     fn test_discovery_message() {
         let task = test_task();
         let ctx = DiscoveryContext {
@@ -1236,6 +1238,7 @@ mod tests {
     }
 
     #[test]
+    #[traced_test]
     fn test_discovery_message_enum() {
         let task = test_task();
         let ctx = DiscoveryContext {

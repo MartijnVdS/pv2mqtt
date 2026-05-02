@@ -274,6 +274,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[traced_test]
     async fn test_mqtt_task_tls_initialization() {
         let (_tx, rx) = mpsc::channel(1);
         let config = MqttConfig {
