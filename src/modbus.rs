@@ -974,6 +974,7 @@ impl ConnectionTask {
                 model,
                 version,
                 name,
+                value_path: None,
                 unit,
                 device_class,
                 state_class,
@@ -1028,6 +1029,7 @@ impl ConnectionTask {
                     model,
                     version,
                     name,
+                    value_path: Some(format!("Controls.{}", name)),
                     unit: if name == "WMaxLimPct" {
                         Some("%")
                     } else {
@@ -1064,7 +1066,10 @@ impl ConnectionTask {
         let mut payload = serde_json::json!({
             "name": ctx.label,
             "state_topic": self.inverter_topic(serial),
-            "value_template": format!("{{{{ value_json.{} }}}}", ctx.name),
+            "value_template": format!(
+                "{{{{ value_json.{} }}}}",
+                ctx.value_path.as_deref().unwrap_or(ctx.name)
+            ),
             "unique_id": format!("{}_{}_{}", self.topic_prefix, serial, ctx.name),
             "force_update": true,
             "enabled_by_default": ctx.enabled_by_default,
@@ -1111,6 +1116,7 @@ struct DiscoveryContext<'a> {
     model: &'a str,
     version: Option<&'a str>,
     name: &'a str,
+    value_path: Option<String>,
     unit: Option<&'a str>,
     device_class: Option<&'a str>,
     state_class: Option<&'a str>,
@@ -1215,6 +1221,7 @@ mod tests {
             model: "ModelX",
             version: Some("1.2.3"),
             name: "W",
+            value_path: None,
             unit: Some("W"),
             device_class: Some("power"),
             state_class: Some("measurement"),
@@ -1228,6 +1235,7 @@ mod tests {
 
         assert_eq!(topic, "homeassistant/sensor/SN123/W/config");
         assert!(payload.contains("\"state_topic\":\"solar/inverter/SN123\""));
+        assert!(payload.contains("\"value_template\":\"{{ value_json.W }}\""));
         assert!(payload.contains("\"unique_id\":\"solar_SN123_W\""));
         assert!(payload.contains("\"manufacturer\":\"Brand\""));
         assert!(payload.contains("\"model\":\"ModelX\""));
@@ -1246,6 +1254,7 @@ mod tests {
             model: "ModelX",
             version: None,
             name: "St",
+            value_path: None,
             unit: None,
             device_class: Some("enum"),
             state_class: None,
@@ -1259,6 +1268,7 @@ mod tests {
 
         assert_eq!(topic, "homeassistant/sensor/SN123/St/config");
         assert!(payload.contains("\"device_class\":\"enum\""));
+        assert!(payload.contains("\"value_template\":\"{{ value_json.St }}\""));
         assert!(payload.contains("\"options\":[\"OFF\",\"ON\"]"));
         assert!(!payload.contains("\"sw_version\""));
         assert!(!payload.contains("\"unit_of_measurement\""));
