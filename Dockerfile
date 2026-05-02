@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y pkg-config clang lld && \
     if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
         dpkg --add-architecture arm64 && \
         apt-get update && \
-        apt-get install -y gcc-aarch64-linux-gnu libssl-dev:arm64; \
+        apt-get install -y gcc-aarch64-linux-gnu; \
     fi && \
     rm -rf /var/lib/apt/lists/*
 
@@ -45,6 +45,10 @@ COPY --from=builder /usr/src/pv2mqtt/pv2mqtt /app/pv2mqtt
 # -s /sbin/nologin: prevents the user from logging in via shell (security)
 RUN groupadd -r appgroup && useradd -r -g appgroup -G dialout -s /sbin/nologin appuser
 
+# Install root CA certificates
+RUN apt-get update && apt-get install -y ca-certificates
+
 USER appuser
 
-ENTRYPOINT ["/app/pv2mqtt", "/app/pv2mqtt.toml"]
+ENTRYPOINT ["/app/pv2mqtt"]
+CMD ["/app/pv2mqtt.toml"]
