@@ -21,8 +21,10 @@ topic_prefix = "pv2mqtt"
 # Change this if your HomeAssistant instance uses a non-default discovery prefix.
 ha_prefix = "homeassistant"
 
-# Optional: Mutual TLS (mTLS) settings for MQTT.
-# Provide paths to your client certificate and private key (PEM format).
+# Optional: TLS settings for MQTT.
+# Use ca_path if your broker uses a self-signed certificate or a private CA.
+# Provide paths to your client certificate and private key (PEM format) for mTLS.
+# ca_path = "/etc/pv2mqtt/certs/ca.crt"
 # cert_path = "/etc/pv2mqtt/certs/mqtt-client.crt"
 # key_path = "/etc/pv2mqtt/certs/mqtt-client.key"
 
@@ -44,10 +46,11 @@ type = "tcp"
 # address = "hostname:port" or "ip:port"
 address = "192.0.2.10:502"
 
-# Optional: Enable TLS for Modbus Security (usually port 802).
+# Optional: TLS settings for Modbus Security (usually port 802).
+# Use ca_path if your inverter uses a self-signed certificate or a private CA.
+# Use cert_path/key_path for Mutual TLS (mTLS).
 # tls = true 
-
-# Optional: Mutual TLS (mTLS) settings for Modbus-TCP.
+# ca_path = "/etc/pv2mqtt/certs/ca.crt"
 # cert_path = "/etc/pv2mqtt/certs/modbus-client.crt"
 # key_path = "/etc/pv2mqtt/certs/modbus-client.key"
 

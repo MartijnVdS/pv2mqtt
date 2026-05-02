@@ -9,10 +9,23 @@ use std::sync::Arc;
 
 pub fn create_client_config(
     root_cert_store: Arc<rustls::RootCertStore>,
+    ca_path: Option<&str>,
     cert_path: Option<&str>,
     key_path: Option<&str>,
 ) -> Result<rustls::ClientConfig> {
-    let builder = rustls::ClientConfig::builder().with_root_certificates(root_cert_store);
+    let store = if let Some(cp) = ca_path {
+        let mut custom_store = rustls::RootCertStore::empty();
+        for cert in load_certs(cp)? {
+            custom_store.add(cert).map_err(|e| {
+                Pv2MqttError::Config(format!("Failed to add CA certificate: {}", e))
+            })?;
+        }
+        custom_store
+    } else {
+        (*root_cert_store).clone()
+    };
+
+    let builder = rustls::ClientConfig::builder().with_root_certificates(store);
 
     if let (Some(cp), Some(kp)) = (cert_path, key_path) {
         let certs = load_certs(cp)?;

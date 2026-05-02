@@ -76,13 +76,15 @@ Note: If no `config_file` is specified, `pv2mqtt` defaults to `/etc/pv2mqtt.toml
   `pv2mqtt` supports Mutual TLS (mTLS) for both by providing `cert_path` and
   `key_path` in the configuration.
 - TLS Certificate Verification: `pv2mqtt` uses the system's root certificate
-  store to verify server certificates. If you are using **self-signed
-  certificates**, the CA certificate must be installed in the system trust store
-  of the machine (or container) running `pv2mqtt`. There is currently no option
-   to skip certificate verification or provide a custom CA bundle directly in the
-  config.
-- Network Isolation: Isolate your inverters and the machine running `pv2mqtt`
-  on a trusted, monitored network segment.
+  store to verify server certificates. If you specify a path to your CA
+  certificate using the `ca_path` option, only the certificates in that
+  specific file will be trusted. This is recommended for high-security
+  environments or when using self-signed certificates.
+- Network Isolation: Most inverters use the standard Modbus protocol, which
+  lacks built-in authentication. Even when using TLS, an attacker on your local
+  network could bypass `pv2mqtt` and communicate directly with your hardware.
+  *Always* isolate your inverters on a dedicated, firewalled network segment
+  (VLAN) that only allows traffic from the machine running `pv2mqtt`.
 - Principle of Least Privilege: Run `pv2mqtt` with the minimum necessary
   permissions. If using RTU, the user only needs access to the specific serial
   device.

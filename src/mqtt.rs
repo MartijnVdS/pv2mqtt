@@ -105,10 +105,7 @@ fn handle_incoming_publish(
             "false" | "0" | "OFF" => Some(ControlAction::Conn(false)),
             _ => None,
         },
-        "WMaxLimPct" => payload
-            .parse::<f32>()
-            .ok()
-            .map(ControlAction::WMaxLimPct),
+        "WMaxLimPct" => payload.parse::<f32>().ok().map(ControlAction::WMaxLimPct),
         "WMaxLim_Ena" => match payload {
             "true" | "1" | "ON" => Some(ControlAction::WMaxLimEna(true)),
             "false" | "0" | "OFF" => Some(ControlAction::WMaxLimEna(false)),
@@ -179,6 +176,7 @@ impl MqttTask {
 
             let client_config = crate::tls::create_client_config(
                 Arc::clone(&self.root_cert_store),
+                self.config.ca_path.as_deref(),
                 self.config.cert_path.as_deref(),
                 self.config.key_path.as_deref(),
             )?;
@@ -254,6 +252,7 @@ mod tests {
             client_id: "test".to_string(),
             topic_prefix: "solar".to_string(),
             ha_prefix: "homeassistant".to_string(),
+            ca_path: None,
             cert_path: None,
             key_path: None,
         };
@@ -280,6 +279,7 @@ mod tests {
             client_id: "test".to_string(),
             topic_prefix: "solar".to_string(),
             ha_prefix: "homeassistant".to_string(),
+            ca_path: None,
             cert_path: None,
             key_path: None,
         };

@@ -22,6 +22,7 @@ pub struct MqttConfig {
     pub client_id: String,
     pub topic_prefix: String,
     pub ha_prefix: String,
+    pub ca_path: Option<String>,
     pub cert_path: Option<String>,
     pub key_path: Option<String>,
 }
@@ -78,6 +79,7 @@ pub enum ModbusConfig {
         address: String,
         #[serde(default)]
         tls: bool,
+        ca_path: Option<String>,
         cert_path: Option<String>,
         key_path: Option<String>,
     },
@@ -251,6 +253,7 @@ mod tests {
             client_id: "test".to_string(),
             topic_prefix: "pv2mqtt".to_string(),
             ha_prefix: "homeassistant".to_string(),
+            ca_path: None,
             cert_path: None,
             key_path: None,
         };
@@ -261,6 +264,7 @@ mod tests {
             client_id: "test".to_string(),
             topic_prefix: "pv2mqtt".to_string(),
             ha_prefix: "homeassistant".to_string(),
+            ca_path: None,
             cert_path: None,
             key_path: None,
         };
@@ -275,6 +279,7 @@ mod tests {
                 client_id: "test".to_string(),
                 topic_prefix: "solar/".to_string(),
                 ha_prefix: "homeassistant".to_string(),
+                ca_path: None,
                 cert_path: None,
                 key_path: None,
             },
@@ -283,6 +288,7 @@ mod tests {
                 modbus: ModbusConfig::Tcp {
                     address: "127.0.0.1:502".to_string(),
                     tls: false,
+                    ca_path: None,
                     cert_path: None,
                     key_path: None,
                 },
@@ -315,6 +321,7 @@ mod tests {
                 client_id: "test".to_string(),
                 topic_prefix: "solar".to_string(),
                 ha_prefix: "homeassistant".to_string(),
+                ca_path: None,
                 cert_path: None,
                 key_path: None,
             },
@@ -323,6 +330,7 @@ mod tests {
                 modbus: ModbusConfig::Tcp {
                     address: "invalid-address".to_string(),
                     tls: false,
+                    ca_path: None,
                     cert_path: None,
                     key_path: None,
                 },
@@ -340,6 +348,7 @@ mod tests {
         config.connections[0].modbus = ModbusConfig::Tcp {
             address: "inverter.local:502".to_string(),
             tls: true,
+            ca_path: None,
             cert_path: None,
             key_path: None,
         };
@@ -354,6 +363,7 @@ mod tests {
                 client_id: "test".to_string(),
                 topic_prefix: "solar".to_string(),
                 ha_prefix: "homeassistant".to_string(),
+                ca_path: None,
                 cert_path: None,
                 key_path: None,
             },
@@ -369,6 +379,7 @@ mod tests {
             modbus: ModbusConfig::Tcp {
                 address: "127.0.0.1:502".to_string(),
                 tls: false,
+                ca_path: None,
                 cert_path: None,
                 key_path: None,
             },
@@ -387,6 +398,7 @@ mod tests {
                 client_id: "test".to_string(),
                 topic_prefix: "solar".to_string(),
                 ha_prefix: "homeassistant".to_string(),
+                ca_path: None,
                 cert_path: None,
                 key_path: None,
             },
@@ -395,6 +407,7 @@ mod tests {
                 modbus: ModbusConfig::Tcp {
                     address: "127.0.0.1:502".to_string(),
                     tls: false,
+                    ca_path: None,
                     cert_path: None,
                     key_path: None,
                 },
@@ -424,6 +437,7 @@ mod tests {
                 client_id: "test".to_string(),
                 topic_prefix: "solar".to_string(),
                 ha_prefix: "homeassistant".to_string(),
+                ca_path: None,
                 cert_path: None,
                 key_path: None,
             },
@@ -432,6 +446,7 @@ mod tests {
                 modbus: ModbusConfig::Tcp {
                     address: "127.0.0.1:502".to_string(),
                     tls: false,
+                    ca_path: None,
                     cert_path: None,
                     key_path: None,
                 },
@@ -459,6 +474,7 @@ mod tests {
                 client_id: "test".to_string(),
                 topic_prefix: "solar".to_string(),
                 ha_prefix: "homeassistant".to_string(),
+                ca_path: None,
                 cert_path: None,
                 key_path: None,
             },
@@ -467,6 +483,7 @@ mod tests {
                 modbus: ModbusConfig::Tcp {
                     address: "127.0.0.1:502".to_string(),
                     tls: false,
+                    ca_path: None,
                     cert_path: None,
                     key_path: None,
                 },
@@ -495,6 +512,7 @@ mod tests {
                 client_id: "test".to_string(),
                 topic_prefix: "solar".to_string(),
                 ha_prefix: "homeassistant".to_string(),
+                ca_path: None,
                 cert_path: None,
                 key_path: None,
             },

@@ -456,6 +456,7 @@ impl ConnectionTask {
             ModbusConfig::Tcp {
                 address,
                 tls,
+                ca_path,
                 cert_path,
                 key_path,
             } => {
@@ -478,6 +479,7 @@ impl ConnectionTask {
 
                     let client_config = crate::tls::create_client_config(
                         Arc::clone(&self.root_cert_store),
+                        ca_path.as_deref(),
                         cert_path.as_deref(),
                         key_path.as_deref(),
                     )?;
@@ -592,7 +594,7 @@ impl ConnectionTask {
                 ControlAction::Conn(connect) => {
                     // Conn is at offset 2 (relative to Model 123 base)
                     let val = if connect { 1 } else { 0 };
-                    let _ = modbus
+                    modbus
                         .write_multiple_registers(base_addr + 2, &[val])
                         .await
                         .map_err(ModbusError::from)?
@@ -617,7 +619,7 @@ impl ConnectionTask {
                     let raw = (pct / factor).round() as u16;
 
                     // WMaxLimPct is at offset 3
-                    let _ = modbus
+                    modbus
                         .write_multiple_registers(base_addr + 3, &[raw])
                         .await
                         .map_err(ModbusError::from)?
@@ -631,7 +633,7 @@ impl ConnectionTask {
                 ControlAction::WMaxLimEna(enable) => {
                     // WMaxLim_Ena is at offset 4
                     let val = if enable { 1 } else { 0 };
-                    let _ = modbus
+                    modbus
                         .write_multiple_registers(base_addr + 4, &[val])
                         .await
                         .map_err(ModbusError::from)?
@@ -1134,6 +1136,7 @@ mod tests {
                 modbus: ModbusConfig::Tcp {
                     address: "127.0.0.1:502".to_string(),
                     tls: false,
+                    ca_path: None,
                     cert_path: None,
                     key_path: None,
                 },
@@ -1240,6 +1243,7 @@ mod tests {
                 modbus: ModbusConfig::Tcp {
                     address: addr_str,
                     tls: false,
+                    ca_path: None,
                     cert_path: None,
                     key_path: None,
                 },
@@ -1338,6 +1342,7 @@ mod tests {
                 modbus: ModbusConfig::Tcp {
                     address: addr_str,
                     tls: false,
+                    ca_path: None,
                     cert_path: None,
                     key_path: None,
                 },
