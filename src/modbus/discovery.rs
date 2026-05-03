@@ -116,17 +116,19 @@ impl ConnectionTask {
                         let has_controls =
                             device_state.config.enable_controls && available_models.contains(&123);
 
-                        let messages = self.ha.generate_discovery_messages(
-                            &serial,
-                            &manufacturer,
-                            &model,
-                            version_opt.as_deref(),
-                            device_state.supported_model,
-                            has_controls,
-                        );
+                        if self.ha_enabled {
+                            let messages = self.ha.generate_discovery_messages(
+                                &serial,
+                                &manufacturer,
+                                &model,
+                                version_opt.as_deref(),
+                                device_state.supported_model,
+                                has_controls,
+                            );
 
-                        for msg in messages {
-                            self.mqtt_tx.send(msg).await?;
+                            for msg in messages {
+                                self.mqtt_tx.send(msg).await?;
+                            }
                         }
                     } else {
                         info!("Refreshed connection to device (Serial: {})", serial);

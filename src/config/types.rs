@@ -18,9 +18,15 @@ pub struct MqttConfig {
     pub client_id: String,
     pub topic_prefix: String,
     pub ha_prefix: String,
+    #[serde(default = "default_true")]
+    pub ha_enabled: bool,
     pub ca_path: Option<String>,
     pub cert_path: Option<String>,
     pub key_path: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl MqttConfig {
@@ -101,6 +107,7 @@ impl std::fmt::Debug for MqttConfig {
             .field("client_id", &self.client_id)
             .field("topic_prefix", &self.topic_prefix)
             .field("ha_prefix", &self.ha_prefix)
+            .field("ha_enabled", &self.ha_enabled)
             .field("cert_path", &self.cert_path)
             .field("key_path", &self.key_path)
             .finish()

@@ -43,6 +43,7 @@ pub struct ConnectionTask {
     config: ConnectionConfig,
     mqtt_tx: mpsc::Sender<MqttMessage>,
     ha: HomeAssistantIntegration,
+    ha_enabled: bool,
     token: CancellationToken,
     root_cert_store: Arc<rustls::RootCertStore>,
     cmd_rx: tokio::sync::broadcast::Receiver<crate::commands::ModbusCommand>,
@@ -52,8 +53,7 @@ impl ConnectionTask {
     pub fn new(
         config: ConnectionConfig,
         mqtt_tx: mpsc::Sender<MqttMessage>,
-        topic_prefix: String,
-        ha_prefix: String,
+        mqtt_config: &crate::config::MqttConfig,
         token: CancellationToken,
         root_cert_store: Arc<rustls::RootCertStore>,
         cmd_rx: tokio::sync::broadcast::Receiver<crate::commands::ModbusCommand>,
@@ -61,7 +61,11 @@ impl ConnectionTask {
         Self {
             config,
             mqtt_tx,
-            ha: HomeAssistantIntegration::new(topic_prefix, ha_prefix),
+            ha: HomeAssistantIntegration::new(
+                mqtt_config.topic_prefix.clone(),
+                mqtt_config.ha_prefix.clone(),
+            ),
+            ha_enabled: mqtt_config.ha_enabled,
             token,
             root_cert_store,
             cmd_rx,

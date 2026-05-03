@@ -51,6 +51,14 @@ async fn main() -> Result<()> {
     let config = match Config::load(&config_path) {
         Ok(c) => {
             info!("Configuration loaded successfully");
+            info!(
+                "Home Assistant Autodiscovery: {}",
+                if c.mqtt.ha_enabled {
+                    "Enabled"
+                } else {
+                    "Disabled"
+                }
+            );
             c
         }
         Err(e) => {

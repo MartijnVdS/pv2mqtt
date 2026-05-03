@@ -60,8 +60,7 @@ impl TaskManager {
         let mut connection_handles = Vec::new();
         for conn_config in self.config.connections.clone() {
             let mqtt_tx = self.mqtt_tx.clone();
-            let topic_prefix = self.config.mqtt.topic_prefix.clone();
-            let ha_prefix = self.config.mqtt.ha_prefix.clone();
+            let mqtt_config = self.config.mqtt.clone();
             let token = self.shutdown_token.clone();
             let conn_certs = Arc::clone(&self.root_cert_store);
             let cmd_rx = self.cmd_tx.subscribe();
@@ -70,8 +69,7 @@ impl TaskManager {
                 let task = ConnectionTask::new(
                     conn_config,
                     mqtt_tx,
-                    topic_prefix,
-                    ha_prefix,
+                    &mqtt_config,
                     token,
                     conn_certs,
                     cmd_rx,

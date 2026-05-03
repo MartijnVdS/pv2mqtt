@@ -21,6 +21,11 @@ topic_prefix = "pv2mqtt"
 # Change this if your HomeAssistant instance uses a non-default discovery prefix.
 ha_prefix = "homeassistant"
 
+# Enable or disable Home Assistant MQTT autodiscovery. 
+# If disabled, no discovery messages will be published to the ha_prefix.
+# Default: true
+# ha_enabled = true
+
 # Optional: TLS settings for MQTT.
 # Use ca_path if your broker uses a self-signed certificate or a private CA.
 # Provide paths to your client certificate and private key (PEM format) for mTLS.

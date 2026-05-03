@@ -27,6 +27,7 @@ fn test_task() -> ConnectionTask {
         },
         mqtt_tx: tx,
         ha: HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string()),
+        ha_enabled: true,
         token: CancellationToken::new(),
         root_cert_store,
         cmd_rx,
@@ -188,6 +189,7 @@ async fn test_reconnection_logic() {
         },
         mqtt_tx: tx,
         ha: HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string()),
+        ha_enabled: true,
         token: token.clone(),
         root_cert_store,
         cmd_rx,
@@ -260,6 +262,7 @@ async fn test_successful_poll_logic() {
         },
         mqtt_tx: tx,
         ha: HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string()),
+        ha_enabled: true,
         token: token.clone(),
         root_cert_store,
         cmd_rx,
@@ -402,6 +405,7 @@ async fn test_command_execution_logic() {
         },
         mqtt_tx: tx,
         ha: HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string()),
+        ha_enabled: true,
         token: token.clone(),
         root_cert_store,
         cmd_rx,
@@ -522,6 +526,7 @@ async fn test_command_ignored_when_controls_disabled() {
         },
         mqtt_tx: tx,
         ha: HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string()),
+        ha_enabled: true,
         token: token.clone(),
         root_cert_store,
         cmd_rx,
@@ -569,6 +574,97 @@ async fn test_command_ignored_when_controls_disabled() {
 
     // Verify warning log
     assert!(command_logged, "Did not see expected warning log");
+
+    token_clone.cancel();
+    tokio::time::advance(Duration::from_millis(100)).await;
+    let _ = task_handle.await.unwrap();
+}
+
+#[tokio::test]
+#[traced_test]
+async fn test_discovery_disabled_logic() {
+    tokio::time::pause();
+
+    let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+    let handle_mock = modbus_test_utils::start_mock_server(addr).await;
+    let addr_str = handle_mock.addr.to_string();
+    let regs = handle_mock.registers;
+
+    // Setup SunSpec discovery registers
+    {
+        let mut r = regs.lock().unwrap();
+        let next_addr = setup_mock_sunspec_registers(&mut r);
+        r[next_addr] = 0xFFFF;
+    }
+
+    let (tx, mut rx) = mpsc::channel(100);
+    let token = CancellationToken::new();
+    let root_cert_store = Arc::new(rustls::RootCertStore::empty());
+
+    let (_, cmd_rx) = tokio::sync::broadcast::channel(1);
+    let task = ConnectionTask {
+        config: ConnectionConfig {
+            name: "test".to_string(),
+            modbus: ModbusConfig::Tcp {
+                address: addr_str,
+                tls: false,
+                ca_path: None,
+                cert_path: None,
+                key_path: None,
+            },
+            devices: vec![DeviceConfig {
+                unit_id: 1,
+                interval: 1,
+                enable_controls: false,
+            }],
+            keep_alive_interval: None,
+        },
+        mqtt_tx: tx,
+        ha: HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string()),
+        ha_enabled: false, // DISABLED
+        token: token.clone(),
+        root_cert_store,
+        cmd_rx,
+    };
+
+    let token_clone = token.clone();
+    let task_handle = tokio::spawn(async move { task.run_internal().await });
+
+    // Collect messages
+    let mut messages = Vec::new();
+    for _ in 0..100 {
+        tokio::time::advance(Duration::from_millis(10)).await;
+        while let Ok(msg) = rx.try_recv() {
+            messages.push(msg);
+        }
+        // Wait until we get at least one non-discovery message (e.g. status)
+        if messages.iter().any(|m| {
+            let MqttMessage::Publish { topic, .. } = m;
+            topic.ends_with("/status")
+        }) {
+            break;
+        }
+    }
+
+    // Verify NO discovery messages were sent
+    let discovery_msgs: Vec<_> = messages
+        .iter()
+        .filter(|m| {
+            let MqttMessage::Publish { topic, .. } = m;
+            topic.starts_with("homeassistant/")
+        })
+        .collect();
+
+    assert!(
+        discovery_msgs.is_empty(),
+        "Discovery messages should NOT be sent when ha_enabled is false"
+    );
+
+    // Verify that data/status messages WERE sent
+    assert!(
+        !messages.is_empty(),
+        "Some messages (data/status) should still be sent"
+    );
 
     token_clone.cancel();
     tokio::time::advance(Duration::from_millis(100)).await;

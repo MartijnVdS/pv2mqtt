@@ -364,14 +364,8 @@ mod tests {
     #[test]
     fn test_generate_discovery_messages_m103_with_controls() {
         let ha = HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string());
-        let msgs = ha.generate_discovery_messages(
-            "SN123",
-            "Manufacturer",
-            "Model",
-            None,
-            Some(103),
-            true,
-        );
+        let msgs =
+            ha.generate_discovery_messages("SN123", "Manufacturer", "Model", None, Some(103), true);
 
         // Calculation:
         // - Core sensors: 6
