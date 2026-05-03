@@ -7,6 +7,27 @@ use std::io::BufReader;
 use std::path::Path;
 use std::sync::Arc;
 
+pub async fn load_native_certs() -> Result<Arc<rustls::RootCertStore>> {
+    tokio::task::spawn_blocking(|| {
+        let mut root_cert_store = rustls::RootCertStore::empty();
+        let certs = rustls_native_certs::load_native_certs();
+        for cert in certs.certs {
+            if let Err(e) = root_cert_store.add(cert) {
+                tracing::warn!("Could not add a native certificate: {}", e);
+            }
+        }
+        if !certs.errors.is_empty() {
+            tracing::warn!(
+                "Some native certificates could not be loaded: {:?}",
+                certs.errors
+            );
+        }
+        Ok(Arc::new(root_cert_store))
+    })
+    .await
+    .map_err(|e| Pv2MqttError::Internal(format!("Failed to load native certificates: {}", e)))?
+}
+
 pub fn create_client_config(
     root_cert_store: Arc<rustls::RootCertStore>,
     ca_path: Option<&str>,
