@@ -4,17 +4,19 @@ use crate::commands::{ControlAction, ModbusCommand};
 use crate::config::MqttConfig;
 use crate::error::{Pv2MqttError, Result};
 use rumqttc::{
-    AsyncClient, Event, EventLoop, Incoming, MqttOptions, QoS, TlsConfiguration, Transport,
+    AsyncClient, Event, EventLoop, Incoming, MqttOptions, Outgoing, QoS, TlsConfiguration,
+    Transport,
 };
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, debug, error, info, info_span, trace, warn};
 
 const MQTT_KEEPALIVE_INTERVAL_SECS: u16 = 30;
-const MQTT_SHUTDOWN_DELAY: u64 = 500;
 const MQTT_MAX_PAYLOAD_SIZE: usize = 64;
 const MQTT_RECONNECT_DELAY_SECS: u64 = 5;
+const MQTT_SHUTDOWN_TIMEOUT_MILLIS: u64 = 500;
 
 #[derive(Debug)]
 pub enum MqttMessage {
@@ -37,29 +39,45 @@ async fn run_eventloop(
     mut eventloop: EventLoop,
     cmd_tx: tokio::sync::broadcast::Sender<ModbusCommand>,
     topic_prefix: String,
+    shutdown_token: CancellationToken,
 ) -> Result<()> {
     let subscribe_topic = format!("{}/inverter/+/set/+", topic_prefix);
     loop {
-        match eventloop.poll().await {
-            Ok(notification) => {
-                trace!("MQTT Notification: {:?}", notification);
-                match notification {
-                    Event::Incoming(Incoming::ConnAck(_)) => {
-                        info!("MQTT connected");
-                        debug!("Re-subscribing to {}", subscribe_topic);
-                        if let Err(e) = client.subscribe(&subscribe_topic, QoS::AtLeastOnce).await {
-                            error!("Failed to subscribe to {}: {}", subscribe_topic, e);
+        tokio::select! {
+            _ = shutdown_token.cancelled() => {
+                debug!("MQTT eventloop shutting down due to signal");
+                return Ok(());
+            }
+            res = eventloop.poll() => {
+                match res {
+                    Ok(notification) => {
+                        trace!("MQTT Notification: {:?}", notification);
+                        match notification {
+                            Event::Incoming(Incoming::ConnAck(_)) => {
+                                info!("MQTT connected");
+                                debug!("Re-subscribing to {}", subscribe_topic);
+                                if let Err(e) = client.subscribe(&subscribe_topic, QoS::AtLeastOnce).await {
+                                    error!("Failed to subscribe to {}: {}", subscribe_topic, e);
+                                }
+                            }
+                            Event::Incoming(Incoming::Publish(p)) => {
+                                handle_incoming_publish(&p, &cmd_tx, &topic_prefix);
+                            }
+                            Event::Outgoing(Outgoing::Disconnect) => {
+                                debug!("MQTT disconnect sent, exiting eventloop");
+                                return Ok(());
+                            }
+                            _ => {}
                         }
                     }
-                    Event::Incoming(Incoming::Publish(p)) => {
-                        handle_incoming_publish(&p, &cmd_tx, &topic_prefix);
+                    Err(e) => {
+                        error!("MQTT error: {}", e);
+                        tokio::select! {
+                            _ = shutdown_token.cancelled() => return Ok(()),
+                            _ = tokio::time::sleep(Duration::from_secs(MQTT_RECONNECT_DELAY_SECS)) => {}
+                        }
                     }
-                    _ => {}
                 }
-            }
-            Err(e) => {
-                error!("MQTT error: {}", e);
-                tokio::time::sleep(Duration::from_secs(MQTT_RECONNECT_DELAY_SECS)).await;
             }
         }
     }
@@ -204,13 +222,22 @@ impl MqttTask {
         let topic_prefix = self.config.topic_prefix.clone();
         let eventloop_cmd_tx = self.cmd_tx.clone();
         let client_clone = client.clone();
-        let eventloop_handle =
-            tokio::spawn(
-                async move {
-                    run_eventloop(client_clone, eventloop, eventloop_cmd_tx, topic_prefix).await
-                }
-                .instrument(info_span!("mqtt_eventloop")),
-            );
+        let shutdown_token = CancellationToken::new();
+        let shutdown_token_clone = shutdown_token.clone();
+
+        let eventloop_handle = tokio::spawn(
+            async move {
+                run_eventloop(
+                    client_clone,
+                    eventloop,
+                    eventloop_cmd_tx,
+                    topic_prefix,
+                    shutdown_token_clone,
+                )
+                .await
+            }
+            .instrument(info_span!("mqtt_eventloop")),
+        );
 
         while let Some(msg) = self.rx.recv().await {
             match msg {
@@ -233,9 +260,18 @@ impl MqttTask {
 
         info!("MQTT task shutting down (channel closed)");
         let _ = client.disconnect().await;
-        // Give it a moment to flush the disconnect packet
-        tokio::time::sleep(Duration::from_millis(MQTT_SHUTDOWN_DELAY)).await;
-        eventloop_handle.abort();
+
+        // Signal the event loop to stop if it's currently in a retry sleep.
+        // The event loop will still finish processing the disconnect packet if possible
+        // because the poll() branch in its select! will compete with the cancellation.
+        shutdown_token.cancel();
+
+        // Wait for eventloop to finish or timeout as fallback
+        let _ = tokio::time::timeout(
+            Duration::from_millis(MQTT_SHUTDOWN_TIMEOUT_MILLIS),
+            eventloop_handle,
+        )
+        .await;
 
         Ok(())
     }
@@ -269,7 +305,7 @@ mod tests {
         // Drop sender to signal shutdown
         drop(tx);
 
-        // Task should finish cleanly
+        // Task should finish cleanly and fast (no more real-world sleep)
         let result = tokio::time::timeout(Duration::from_secs(1), handle).await;
         assert!(result.is_ok(), "Task did not shut down in time");
         assert!(result.unwrap().unwrap().is_ok(), "Task returned an error");
