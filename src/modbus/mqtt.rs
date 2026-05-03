@@ -222,6 +222,26 @@ impl ConnectionTask {
                     })
                     .await?;
             }
+        } else {
+            // Cleanup: Publish empty retained payloads to clear old discovery topics
+            let cleanup_controls = vec![
+                ("Conn", "switch"),
+                ("WMaxLimPct", "number"),
+                ("WMaxLim_Ena", "switch"),
+            ];
+            for (name, component) in cleanup_controls {
+                let topic = format!(
+                    "{}/{}/{}/{}/config",
+                    self.ha_prefix, component, serial, name
+                );
+                self.mqtt_tx
+                    .send(MqttMessage::Publish {
+                        topic,
+                        payload: "".to_string(),
+                        retain: true,
+                    })
+                    .await?;
+            }
         }
 
         Ok(())

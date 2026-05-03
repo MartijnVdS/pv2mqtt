@@ -264,9 +264,9 @@ async fn test_successful_poll_logic() {
 
     // Collect messages by advancing time in small increments
     let mut messages = Vec::new();
-    // Discovery (12) + at least one poll (2: Data + Status) = 14 messages
+    // Discovery (12) + cleanup for disabled controls (3) + at least one poll (2: Data + Status) = 17 messages
     let mut timeout_counter = 0;
-    while messages.len() < 14 && timeout_counter < 500 {
+    while messages.len() < 17 && timeout_counter < 500 {
         tokio::time::advance(Duration::from_millis(10)).await;
         while let Ok(msg) = rx.try_recv() {
             messages.push(msg);
@@ -275,8 +275,8 @@ async fn test_successful_poll_logic() {
     }
 
     assert!(
-        messages.len() >= 14,
-        "Should have received at least 14 MQTT messages, got {}",
+        messages.len() >= 17,
+        "Should have received at least 17 MQTT messages, got {}",
         messages.len()
     );
 
