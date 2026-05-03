@@ -2,14 +2,14 @@
 
 mod command;
 mod discovery;
-mod mqtt;
 mod polling;
 mod types;
 
-pub use types::{DeviceState, DiscoveryContext};
+pub use types::DeviceState;
 
 use crate::config::{ConnectionConfig, ModbusConfig, Parity};
 use crate::error::{ModbusError, Pv2MqttError, Result};
+use crate::homeassistant::HomeAssistantIntegration;
 use crate::mqtt::MqttMessage;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -42,8 +42,7 @@ const M123_WMAX_LIM_PCT_SF_OFFSET: u16 = 21;
 pub struct ConnectionTask {
     config: ConnectionConfig,
     mqtt_tx: mpsc::Sender<MqttMessage>,
-    topic_prefix: String,
-    ha_prefix: String,
+    ha: HomeAssistantIntegration,
     token: CancellationToken,
     root_cert_store: Arc<rustls::RootCertStore>,
     cmd_rx: tokio::sync::broadcast::Receiver<crate::commands::ModbusCommand>,
@@ -62,8 +61,7 @@ impl ConnectionTask {
         Self {
             config,
             mqtt_tx,
-            topic_prefix,
-            ha_prefix,
+            ha: HomeAssistantIntegration::new(topic_prefix, ha_prefix),
             token,
             root_cert_store,
             cmd_rx,

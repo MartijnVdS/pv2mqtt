@@ -3,6 +3,7 @@
 mod commands;
 mod config;
 mod error;
+mod homeassistant;
 mod modbus;
 mod models;
 mod mqtt;

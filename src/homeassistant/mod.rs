@@ -1,32 +1,67 @@
-use super::{ConnectionTask, DiscoveryContext, MqttMessage};
-use crate::error::Pv2MqttError;
-use crate::error::Result;
-use chrono::{DateTime, Utc};
+// SPDX-License-Identifier: Apache-2.0
 
-impl ConnectionTask {
+use crate::error::Pv2MqttError;
+use crate::mqtt::MqttMessage;
+use chrono::{DateTime, Utc};
+use serde_json::json;
+
+pub struct HomeAssistantIntegration {
+    topic_prefix: String,
+    ha_prefix: String,
+}
+
+pub struct DiscoveryContext<'a> {
+    pub manufacturer: &'a str,
+    pub model: &'a str,
+    pub version: Option<&'a str>,
+    pub name: &'a str,
+    pub value_path: Option<String>,
+    pub unit: Option<&'a str>,
+    pub device_class: Option<&'a str>,
+    pub state_class: Option<&'a str>,
+    pub label: &'a str,
+    pub enabled_by_default: bool,
+    pub options: Option<Vec<&'static str>>,
+    pub component: Option<&'static str>,
+    pub command_topic: Option<String>,
+}
+
+impl HomeAssistantIntegration {
+    pub fn new(topic_prefix: String, ha_prefix: String) -> Self {
+        Self {
+            topic_prefix,
+            ha_prefix,
+        }
+    }
+
     pub fn inverter_topic(&self, serial: &str) -> String {
         format!("{}/inverter/{}", self.topic_prefix, serial)
     }
 
-    pub fn status_message(
+    pub fn generate_status_message(
         &self,
         serial: &str,
         status: &str,
         error: Option<&Pv2MqttError>,
         last_success: Option<&DateTime<Utc>>,
-    ) -> (String, String) {
+    ) -> MqttMessage {
         let topic = format!("{}/inverter/{}/status", self.topic_prefix, serial);
-        let payload = serde_json::json!({
+        let payload = json!({
             "timestamp": last_success.map(|dt| dt.to_rfc3339()),
             "status": status,
             "error": error.as_ref().map(|e| e.to_string()),
             "error_category": error.as_ref().map(|e| e.category()),
         })
         .to_string();
-        (topic, payload)
+
+        MqttMessage::Publish {
+            topic,
+            payload,
+            retain: true,
+        }
     }
 
-    pub async fn publish_discovery(
+    pub fn generate_discovery_messages(
         &self,
         serial: &str,
         manufacturer: &str,
@@ -34,7 +69,8 @@ impl ConnectionTask {
         version: Option<&str>,
         model_id: Option<u16>,
         enable_controls: bool,
-    ) -> Result<()> {
+    ) -> Vec<MqttMessage> {
+        let mut messages = Vec::new();
         let mut sensors = vec![
             ("W", Some("W"), Some("power"), Some("measurement"), "Power"),
             (
@@ -70,7 +106,6 @@ impl ConnectionTask {
 
         // Add phase-specific sensors based on model
         if let Some(id) = model_id {
-            // All supported models have at least Phase A
             sensors.push((
                 "PhVphA",
                 Some("V"),
@@ -155,16 +190,13 @@ impl ConnectionTask {
                 command_topic: None,
             };
             let (topic, payload) = self.discovery_message(serial, &ctx);
-            self.mqtt_tx
-                .send(MqttMessage::Publish {
-                    topic,
-                    payload,
-                    retain: true,
-                })
-                .await?;
+            messages.push(MqttMessage::Publish {
+                topic,
+                payload,
+                retain: true,
+            });
         }
 
-        // Add control entities if Model 123 is enabled
         if enable_controls {
             let controls = vec![
                 (
@@ -214,16 +246,13 @@ impl ConnectionTask {
                     command_topic: Some(cmd_topic),
                 };
                 let (topic, payload) = self.discovery_message(serial, &ctx);
-                self.mqtt_tx
-                    .send(MqttMessage::Publish {
-                        topic,
-                        payload,
-                        retain: true,
-                    })
-                    .await?;
+                messages.push(MqttMessage::Publish {
+                    topic,
+                    payload,
+                    retain: true,
+                });
             }
         } else {
-            // Cleanup: Publish empty retained payloads to clear old discovery topics
             let cleanup_controls = vec![
                 ("Conn", "switch"),
                 ("WMaxLimPct", "number"),
@@ -234,17 +263,15 @@ impl ConnectionTask {
                     "{}/{}/{}/{}/config",
                     self.ha_prefix, component, serial, name
                 );
-                self.mqtt_tx
-                    .send(MqttMessage::Publish {
-                        topic,
-                        payload: "".to_string(),
-                        retain: true,
-                    })
-                    .await?;
+                messages.push(MqttMessage::Publish {
+                    topic,
+                    payload: "".to_string(),
+                    retain: true,
+                });
             }
         }
 
-        Ok(())
+        messages
     }
 
     pub fn discovery_message(&self, serial: &str, ctx: &DiscoveryContext) -> (String, String) {
@@ -253,7 +280,7 @@ impl ConnectionTask {
             "{}/{}/{}/{}/config",
             self.ha_prefix, component, serial, ctx.name
         );
-        let mut payload = serde_json::json!({
+        let mut payload = json!({
             "name": ctx.label,
             "state_topic": self.inverter_topic(serial),
             "value_template": format!(
@@ -272,31 +299,137 @@ impl ConnectionTask {
         });
 
         if let Some(cmd_topic) = &ctx.command_topic {
-            payload["command_topic"] = serde_json::json!(cmd_topic);
+            payload["command_topic"] = json!(cmd_topic);
         }
 
         if component == "switch" {
-            payload["payload_on"] = serde_json::json!(true);
-            payload["payload_off"] = serde_json::json!(false);
+            payload["payload_on"] = json!(true);
+            payload["payload_off"] = json!(false);
         }
 
         if let Some(v) = ctx.version {
-            payload["device"]["sw_version"] = serde_json::json!(v);
+            payload["device"]["sw_version"] = json!(v);
         }
 
         if let Some(unit) = ctx.unit {
-            payload["unit_of_measurement"] = serde_json::json!(unit);
+            payload["unit_of_measurement"] = json!(unit);
         }
         if let Some(dc) = ctx.device_class {
-            payload["device_class"] = serde_json::json!(dc);
+            payload["device_class"] = json!(dc);
         }
         if let Some(sc) = ctx.state_class {
-            payload["state_class"] = serde_json::json!(sc);
+            payload["state_class"] = json!(sc);
         }
         if let Some(options) = &ctx.options {
-            payload["options"] = serde_json::json!(options);
+            payload["options"] = json!(options);
         }
 
         (topic, payload.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_generate_discovery_messages_m101() {
+        let ha = HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string());
+        let msgs = ha.generate_discovery_messages(
+            "SN123",
+            "Manufacturer",
+            "Model",
+            Some("1.0"),
+            Some(101),
+            false,
+        );
+
+        // Calculation:
+        // - Core sensors (W, WH, Hz, TmpCab, TmpSnk, St): 6
+        // - Phase A specific (PhVphA, AphA): 2
+        // - Cleanup for disabled controls (Conn, WMaxLimPct, WMaxLim_Ena): 3
+        // Total: 6 + 2 + 3 = 11
+        assert_eq!(msgs.len(), 11);
+
+        // Verify no Phase B/C
+        for msg in &msgs {
+            let MqttMessage::Publish { topic, .. } = msg;
+            assert!(!topic.contains("PhVphB"));
+            assert!(!topic.contains("AphB"));
+            assert!(!topic.contains("PhVphC"));
+            assert!(!topic.contains("AphC"));
+        }
+    }
+
+    #[test]
+    fn test_generate_discovery_messages_m103_with_controls() {
+        let ha = HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string());
+        let msgs = ha.generate_discovery_messages(
+            "SN123",
+            "Manufacturer",
+            "Model",
+            None,
+            Some(103),
+            true,
+        );
+
+        // Calculation:
+        // - Core sensors: 6
+        // - Phase A: 2
+        // - Phase B: 2
+        // - Phase C: 2
+        // - Controls (Conn, WMaxLimPct, WMaxLim_Ena): 3
+        // Total: 6 + 2 + 2 + 2 + 3 = 15
+        assert_eq!(msgs.len(), 15);
+
+        // Verify presence of Phase C and Controls
+        let mut has_ph_c = false;
+        let mut has_conn = false;
+        for msg in &msgs {
+            let MqttMessage::Publish { topic, .. } = msg;
+            if topic.contains("PhVphC") {
+                has_ph_c = true;
+            }
+            if topic.contains("Conn") {
+                has_conn = true;
+            }
+        }
+        assert!(has_ph_c);
+        assert!(has_conn);
+    }
+
+    #[test]
+    fn test_generate_discovery_messages_cleanup() {
+        let ha = HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string());
+        let msgs = ha.generate_discovery_messages(
+            "SN123",
+            "Manufacturer",
+            "Model",
+            None,
+            Some(101),
+            false, // Controls disabled -> should generate cleanup
+        );
+
+        // Calculation:
+        // - Core sensors: 6
+        // - Phase A: 2
+        // - Cleanup: 3
+        // Total: 6 + 2 + 3 = 11
+        assert_eq!(msgs.len(), 11);
+
+        let cleanup_topics: Vec<_> = msgs
+            .iter()
+            .filter_map(|msg| {
+                let MqttMessage::Publish { topic, payload, .. } = msg;
+                if payload.is_empty() {
+                    Some(topic.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        assert_eq!(cleanup_topics.len(), 3);
+        assert!(cleanup_topics.iter().any(|t| t.contains("Conn")));
     }
 }

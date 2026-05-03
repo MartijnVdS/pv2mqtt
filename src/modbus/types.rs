@@ -23,19 +23,3 @@ impl DeviceState {
         self.device = None;
     }
 }
-
-pub struct DiscoveryContext<'a> {
-    pub manufacturer: &'a str,
-    pub model: &'a str,
-    pub version: Option<&'a str>,
-    pub name: &'a str,
-    pub value_path: Option<String>,
-    pub unit: Option<&'a str>,
-    pub device_class: Option<&'a str>,
-    pub state_class: Option<&'a str>,
-    pub label: &'a str,
-    pub enabled_by_default: bool,
-    pub options: Option<Vec<&'static str>>,
-    pub component: Option<&'static str>,
-    pub command_topic: Option<String>,
-}

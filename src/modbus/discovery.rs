@@ -1,24 +1,30 @@
 use super::{ConnectionTask, DeviceState, POLL_TIMEOUT_SECS};
 use crate::error::{ModbusError, Pv2MqttError, Result};
 use crate::models::SUPPORTED_MODELS;
+use std::sync::Arc;
 use std::time::Duration;
 use sunspec::client::AsyncClient;
 use sunspec::models::model1::Model1;
 use tokio::sync::Mutex;
+use tokio_modbus::Slave;
 use tokio_modbus::client::Context as ModbusContext;
+use tokio_modbus::slave::SlaveContext;
 use tracing::{Instrument, debug, info, info_span, warn};
 
 impl ConnectionTask {
     pub async fn discover_device(
         &self,
-        client: &AsyncClient<std::sync::Arc<Mutex<ModbusContext>>>,
+        client: &AsyncClient<Arc<Mutex<ModbusContext>>>,
         device_state: &mut DeviceState,
     ) -> Result<()> {
         let unit_id = device_state.config.unit_id;
         let span = info_span!("discovery", unit_id);
 
-        async {
-            debug!("Starting discovery for unit {}", unit_id);
+        async move {
+            let mut ctx = client.client.lock().await;
+            ctx.set_slave(Slave(unit_id));
+            drop(ctx);
+
             let device_res = tokio::time::timeout(
                 Duration::from_secs(POLL_TIMEOUT_SECS),
                 client.device(unit_id),
@@ -110,37 +116,35 @@ impl ConnectionTask {
                         let has_controls =
                             device_state.config.enable_controls && available_models.contains(&123);
 
-                        self.publish_discovery(
+                        let messages = self.ha.generate_discovery_messages(
                             &serial,
                             &manufacturer,
                             &model,
                             version_opt.as_deref(),
                             device_state.supported_model,
                             has_controls,
-                        )
-                        .await?;
+                        );
+
+                        for msg in messages {
+                            self.mqtt_tx.send(msg).await?;
+                        }
                     } else {
                         info!("Refreshed connection to device (Serial: {})", serial);
                     }
                 }
                 Ok(Err(e)) => {
-                    if device_state.serial.is_none() {
-                        return Err(Pv2MqttError::ModelRead(1, ModbusError::from(e)));
-                    }
-                    info!(
-                        "Failed to refresh Model 1 for device, using cached info (Serial: {:?})",
-                        device_state.serial
-                    );
+                    warn!("Failed to read Model 1 for unit {}: {}", unit_id, e);
+                    return Err(Pv2MqttError::DeviceDiscovery(unit_id, ModbusError::from(e)));
                 }
                 Err(_) => {
+                    warn!("Timeout reading Model 1 for unit {}", unit_id);
                     return Err(Pv2MqttError::Modbus(ModbusError::Timeout(format!(
-                        "Timeout reading Model 1 from device {}",
+                        "Timeout reading Model 1 for device {}",
                         unit_id
                     ))));
                 }
             }
 
-            // Store the device for later use
             device_state.device = Some(device);
             Ok(())
         }

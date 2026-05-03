@@ -118,4 +118,29 @@ mod tests {
         assert_relative_eq!(data.w, 0.0);
         assert_eq!(data.va, None);
     }
+
+    #[test]
+    fn test_model101_conversion() {
+        let mut m101 = empty_m101();
+        m101.ph_vph_a = 2300;
+        m101.v_sf = -1;
+        m101.w = 2300;
+        m101.w_sf = 1;
+        m101.st = St101::Mppt;
+        let mut data = InverterData::default();
+        m101.into_inverter_data(&mut data);
+        assert_relative_eq!(data.v_an.unwrap(), 230.0);
+        assert_relative_eq!(data.w, 23000.0);
+        assert_eq!(data.st, "MPPT");
+    }
+
+    #[test]
+    fn test_model101_large_energy_precision() {
+        let mut m101 = empty_m101();
+        m101.wh = 20000001;
+        m101.wh_sf = 0;
+        let mut data = InverterData::default();
+        m101.into_inverter_data(&mut data);
+        assert_eq!(data.wh, 20000001.0);
+    }
 }

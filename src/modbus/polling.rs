@@ -56,7 +56,7 @@ impl ConnectionTask {
 
                     device_state.last_success_timestamp = Some(Utc::now());
                     let payload = serde_json::to_string(&data)?;
-                    let topic = self.inverter_topic(serial);
+                    let topic = self.ha.inverter_topic(serial);
                     self.mqtt_tx
                         .send(MqttMessage::Publish {
                             topic,
@@ -65,19 +65,13 @@ impl ConnectionTask {
                         })
                         .await?;
 
-                    let (status_topic, status_payload) = self.status_message(
+                    let status_msg = self.ha.generate_status_message(
                         serial,
                         "OK",
                         None,
                         device_state.last_success_timestamp.as_ref(),
                     );
-                    self.mqtt_tx
-                        .send(MqttMessage::Publish {
-                            topic: status_topic,
-                            payload: status_payload,
-                            retain: true,
-                        })
-                        .await?;
+                    self.mqtt_tx.send(status_msg).await?;
                 }
                 Ok(Err(e)) => {
                     let pv_err = match e {
@@ -86,40 +80,26 @@ impl ConnectionTask {
                     };
                     error!("Failed to poll: {}", pv_err);
                     // Update status with error
-                    let (status_topic, status_payload) = self.status_message(
+                    let status_msg = self.ha.generate_status_message(
                         serial,
                         "ERROR",
                         Some(&pv_err),
                         device_state.last_success_timestamp.as_ref(),
                     );
-                    let _ = self
-                        .mqtt_tx
-                        .send(MqttMessage::Publish {
-                            topic: status_topic,
-                            payload: status_payload,
-                            retain: true,
-                        })
-                        .await;
+                    let _ = self.mqtt_tx.send(status_msg).await;
                     return Err(pv_err);
                 }
                 Err(_) => {
                     let pv_err =
                         Pv2MqttError::Internal(format!("Timeout polling device {}", serial));
                     error!("{}", pv_err);
-                    let (status_topic, status_payload) = self.status_message(
+                    let status_msg = self.ha.generate_status_message(
                         serial,
                         "ERROR",
                         Some(&pv_err),
                         device_state.last_success_timestamp.as_ref(),
                     );
-                    let _ = self
-                        .mqtt_tx
-                        .send(MqttMessage::Publish {
-                            topic: status_topic,
-                            payload: status_payload,
-                            retain: true,
-                        })
-                        .await;
+                    let _ = self.mqtt_tx.send(status_msg).await;
                     return Err(pv_err);
                 }
             }

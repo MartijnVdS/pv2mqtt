@@ -2,6 +2,7 @@ mod modbus_test_utils;
 
 use super::*;
 use crate::config::DeviceConfig;
+use crate::homeassistant::{DiscoveryContext, HomeAssistantIntegration};
 use chrono::Utc;
 use std::sync::atomic::Ordering;
 use tokio::sync::mpsc;
@@ -25,8 +26,7 @@ fn test_task() -> ConnectionTask {
             keep_alive_interval: None,
         },
         mqtt_tx: tx,
-        topic_prefix: "solar".to_string(),
-        ha_prefix: "homeassistant".to_string(),
+        ha: HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string()),
         token: CancellationToken::new(),
         root_cert_store,
         cmd_rx,
@@ -72,15 +72,23 @@ fn setup_mock_sunspec_registers(r: &mut [u16]) -> usize {
 #[traced_test]
 fn test_topics() {
     let task = test_task();
-    assert_eq!(task.inverter_topic("SN123"), "solar/inverter/SN123");
+    assert_eq!(task.ha.inverter_topic("SN123"), "solar/inverter/SN123");
 
-    let (status_topic, payload) = task.status_message("SN123", "OK", None, None);
-    assert_eq!(status_topic, "solar/inverter/SN123/status");
+    let msg = task.ha.generate_status_message("SN123", "OK", None, None);
+    let (topic, payload) = match msg {
+        MqttMessage::Publish { topic, payload, .. } => (topic, payload),
+    };
+    assert_eq!(topic, "solar/inverter/SN123/status");
     assert!(payload.contains("\"timestamp\":null"));
 
     let now = Utc::now();
-    let (_, payload_with_ts) = task.status_message("SN123", "OK", None, Some(&now));
-    assert!(payload_with_ts.contains(&now.to_rfc3339()));
+    let msg_with_ts = task
+        .ha
+        .generate_status_message("SN123", "OK", None, Some(&now));
+    let payload = match msg_with_ts {
+        MqttMessage::Publish { payload, .. } => payload,
+    };
+    assert!(payload.contains(&now.to_rfc3339()));
 }
 
 #[test]
@@ -102,7 +110,7 @@ fn test_discovery_message() {
         component: None,
         command_topic: None,
     };
-    let (topic, payload) = task.discovery_message("SN123", &ctx);
+    let (topic, payload) = task.ha.discovery_message("SN123", &ctx);
 
     assert_eq!(topic, "homeassistant/sensor/SN123/W/config");
     assert!(payload.contains("\"state_topic\":\"solar/inverter/SN123\""));
@@ -135,7 +143,7 @@ fn test_discovery_message_enum() {
         component: None,
         command_topic: None,
     };
-    let (topic, payload) = task.discovery_message("SN123", &ctx);
+    let (topic, payload) = task.ha.discovery_message("SN123", &ctx);
 
     assert_eq!(topic, "homeassistant/sensor/SN123/St/config");
     assert!(payload.contains("\"device_class\":\"enum\""));
@@ -179,8 +187,7 @@ async fn test_reconnection_logic() {
             keep_alive_interval: None,
         },
         mqtt_tx: tx,
-        topic_prefix: "solar".to_string(),
-        ha_prefix: "homeassistant".to_string(),
+        ha: HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string()),
         token: token.clone(),
         root_cert_store,
         cmd_rx,
@@ -252,8 +259,7 @@ async fn test_successful_poll_logic() {
             keep_alive_interval: None,
         },
         mqtt_tx: tx,
-        topic_prefix: "solar".to_string(),
-        ha_prefix: "homeassistant".to_string(),
+        ha: HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string()),
         token: token.clone(),
         root_cert_store,
         cmd_rx,
@@ -395,8 +401,7 @@ async fn test_command_execution_logic() {
             keep_alive_interval: None,
         },
         mqtt_tx: tx,
-        topic_prefix: "solar".to_string(),
-        ha_prefix: "homeassistant".to_string(),
+        ha: HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string()),
         token: token.clone(),
         root_cert_store,
         cmd_rx,
@@ -516,8 +521,7 @@ async fn test_command_ignored_when_controls_disabled() {
             keep_alive_interval: None,
         },
         mqtt_tx: tx,
-        topic_prefix: "solar".to_string(),
-        ha_prefix: "homeassistant".to_string(),
+        ha: HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string()),
         token: token.clone(),
         root_cert_store,
         cmd_rx,
