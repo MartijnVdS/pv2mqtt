@@ -1,14 +1,13 @@
-use super::{ConnectionTask, DeviceState, POLL_TIMEOUT_SECS, READ_TIMEOUT_SECS};
-use crate::error::{ModbusError, Pv2MqttError, Result};
-use crate::models::InverterData;
+use super::{ConnectionTask, DeviceState, POLL_TIMEOUT_SECS};
+use crate::error::{Pv2MqttError, Result};
+use crate::models::{InverterData, poll_and_apply};
 use crate::mqtt::MqttMessage;
 use chrono::Utc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use sunspec::client::AsyncDevice;
 use tokio::sync::Mutex;
-use tokio_modbus::Slave;
-use tokio_modbus::client::{Context as ModbusContext, Reader};
+use tokio_modbus::client::Context as ModbusContext;
 use tokio_modbus::slave::SlaveContext;
 use tracing::{Instrument, debug, error, info, info_span, warn};
 
@@ -47,8 +46,8 @@ impl ConnectionTask {
 
                     // Optionally poll Model 123 for controls status
                     if device_state.config.enable_controls {
-                        match self.poll_model123(device).await {
-                            Ok(c) => data.controls = Some(c),
+                        match poll_and_apply(123, device, &mut data).await {
+                            Ok(_) => {}
                             Err(e) => {
                                 warn!("Failed to poll controls (Model 123) for {}: {}", serial, e);
                             }
@@ -104,10 +103,8 @@ impl ConnectionTask {
                     return Err(pv_err);
                 }
                 Err(_) => {
-                    let pv_err = Pv2MqttError::Modbus(ModbusError::Timeout(format!(
-                        "Timeout polling device {}",
-                        serial
-                    )));
+                    let pv_err =
+                        Pv2MqttError::Internal(format!("Timeout polling device {}", serial));
                     error!("{}", pv_err);
                     let (status_topic, status_payload) = self.status_message(
                         serial,
@@ -137,57 +134,19 @@ impl ConnectionTask {
         device: &AsyncDevice<Arc<Mutex<ModbusContext>>>,
         model_id: u16,
     ) -> Result<InverterData> {
-        use sunspec::models::{
-            model101::Model101, model102::Model102, model103::Model103, model111::Model111,
-            model112::Model112, model113::Model113,
+        let mut data = InverterData {
+            timestamp: Utc::now(),
+            ..Default::default()
         };
-        match model_id {
-            101 => Ok(device
-                .read_model::<Model101>()
-                .await
-                .map_err(Pv2MqttError::from)?
-                .into()),
-            102 => Ok(device
-                .read_model::<Model102>()
-                .await
-                .map_err(Pv2MqttError::from)?
-                .into()),
-            103 => Ok(device
-                .read_model::<Model103>()
-                .await
-                .map_err(Pv2MqttError::from)?
-                .into()),
-            111 => Ok(device
-                .read_model::<Model111>()
-                .await
-                .map_err(Pv2MqttError::from)?
-                .into()),
-            112 => Ok(device
-                .read_model::<Model112>()
-                .await
-                .map_err(Pv2MqttError::from)?
-                .into()),
-            113 => Ok(device
-                .read_model::<Model113>()
-                .await
-                .map_err(Pv2MqttError::from)?
-                .into()),
-            _ => Err(Pv2MqttError::UnsupportedModel(model_id)),
-        }
-    }
-
-    pub async fn poll_model123(
-        &self,
-        device: &AsyncDevice<Arc<Mutex<ModbusContext>>>,
-    ) -> Result<crate::models::Model123Data> {
-        let m123 = device
-            .read_model::<sunspec::models::model123::Model123>()
-            .await
-            .map_err(Pv2MqttError::from)?;
-        Ok(m123.into())
+        poll_and_apply(model_id, device, &mut data).await?;
+        Ok(data)
     }
 
     pub async fn ping_device(&self, device: &AsyncDevice<Arc<Mutex<ModbusContext>>>) -> Result<()> {
+        use crate::modbus::READ_TIMEOUT_SECS;
+        use tokio_modbus::Slave;
+        use tokio_modbus::client::Reader;
+
         debug!("Sending keep-alive");
         let addr = device.models.m1.addr;
         let mut ctx = device.client.lock().await;
@@ -198,11 +157,10 @@ impl ConnectionTask {
         )
         .await
         .map_err(|_| {
-            ModbusError::Timeout(format!("Keep-alive timeout for unit {}", device.slave_id))
+            Pv2MqttError::Internal(format!("Keep-alive timeout for unit {}", device.slave_id))
         })??;
 
-        let _ =
-            regs_res.map_err(|e| ModbusError::Protocol(format!("Keep-alive exception: {}", e)))?;
+        let _ = regs_res.map_err(|e| Pv2MqttError::Internal(format!("Keep-alive error: {}", e)))?;
 
         Ok(())
     }
