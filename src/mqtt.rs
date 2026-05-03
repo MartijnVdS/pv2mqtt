@@ -44,6 +44,7 @@ async fn run_eventloop(
     let subscribe_topic = format!("{}/inverter/+/set/+", topic_prefix);
     loop {
         tokio::select! {
+            biased;
             _ = shutdown_token.cancelled() => {
                 debug!("MQTT eventloop shutting down due to signal");
                 return Ok(());

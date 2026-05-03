@@ -22,7 +22,7 @@ use tokio_rustls::TlsConnector;
 use tokio_rustls::rustls::pki_types::ServerName;
 use tokio_serial::SerialStream;
 use tokio_util::sync::CancellationToken;
-use tracing::{Instrument, error, info, info_span};
+use tracing::{Instrument, debug, error, info, info_span, warn};
 
 const COMMAND_POLL_DELAY_MILLIS: u64 = 250;
 const CONNECT_TIMEOUT_SECS: u64 = 10;
@@ -161,11 +161,6 @@ impl ConnectionTask {
         let keep_alive_duration = Duration::from_secs(keep_alive_interval);
 
         loop {
-            if self.token.is_cancelled() {
-                info!("Shutting down polling loop");
-                return Ok(());
-            }
-
             let now = Instant::now();
             let mut next_wakeup =
                 if keep_alive_interval > 0 && devices.iter().any(|d| d.device.is_some()) {
@@ -188,16 +183,27 @@ impl ConnectionTask {
                 .max(Duration::from_millis(MIN_SLEEP_MILLIS));
 
             tokio::select! {
-                _ = tokio::time::sleep(sleep_duration) => {}
-                _ = self.token.cancelled() => return Ok(()),
-                res = cmd_rx.recv() => {
-                    if let Ok(ref cmd) = res {
-                         self.handle_command(&ctx, devices, cmd.clone()).await;
-                    }
-                    if res.is_ok() {
-                        continue;
-                    }
+                biased;
+                _ = self.token.cancelled() => {
+                    info!("Shutting down polling loop");
+                    return Ok(());
                 }
+                res = cmd_rx.recv() => {
+                    match res {
+                        Ok(cmd) => {
+                            self.handle_command(&ctx, devices, cmd).await;
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                            warn!("Command channel lagged by {} messages", n);
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            debug!("Command channel closed");
+                        }
+                    }
+                    // No continue here; we fall through to check if any polls are due.
+                    // This prevents a flood of commands from starving the polling logic.
+                }
+                _ = tokio::time::sleep(sleep_duration) => {}
             }
 
             let now = Instant::now();
