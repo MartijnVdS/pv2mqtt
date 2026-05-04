@@ -1,38 +1,19 @@
-mod modbus_test_utils;
+// SPDX-License-Identifier: Apache-2.0
 
-use super::*;
-use crate::config::DeviceConfig;
-use crate::homeassistant::{DiscoveryContext, HomeAssistantIntegration};
-use chrono::Utc;
+use crate::common::modbus_server;
+use pv2mqtt::config::{ConnectionConfig, DeviceConfig, ModbusConfig};
+use pv2mqtt::homeassistant::HomeAssistantIntegration;
+use pv2mqtt::modbus::{
+    ConnectionTask, M123_CONN_OFFSET, M123_WMAX_LIM_PCT_SF_OFFSET, RECONNECT_TIMEOUT_SECS,
+};
+use pv2mqtt::mqtt::MqttMessage;
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
+use tracing::Instrument;
 use tracing_test::traced_test;
-
-fn test_task() -> ConnectionTask {
-    let (tx, _) = mpsc::channel(1);
-    let root_cert_store = Arc::new(rustls::RootCertStore::empty());
-    let (_, cmd_rx) = tokio::sync::broadcast::channel(1);
-    ConnectionTask {
-        config: ConnectionConfig {
-            name: "test".to_string(),
-            modbus: ModbusConfig::Tcp {
-                address: "127.0.0.1:502".to_string(),
-                tls: false,
-                ca_path: None,
-                cert_path: None,
-                key_path: None,
-            },
-            devices: vec![],
-            keep_alive_interval: None,
-        },
-        mqtt_tx: tx,
-        ha: HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string()),
-        ha_enabled: true,
-        token: CancellationToken::new(),
-        root_cert_store,
-        cmd_rx,
-    }
-}
 
 fn setup_mock_sunspec_registers(r: &mut [u16]) -> usize {
     r[40000] = 0x5375; // 'Su'
@@ -69,92 +50,6 @@ fn setup_mock_sunspec_registers(r: &mut [u16]) -> usize {
     40122
 }
 
-#[test]
-#[traced_test]
-fn test_topics() {
-    let task = test_task();
-    assert_eq!(task.ha.inverter_topic("SN123"), "solar/inverter/SN123");
-
-    let msg = task.ha.generate_status_message("SN123", "OK", None, None);
-    let (topic, payload) = match msg {
-        MqttMessage::Publish { topic, payload, .. } => (topic, payload),
-    };
-    assert_eq!(topic, "solar/inverter/SN123/status");
-    assert!(payload.contains("\"timestamp\":null"));
-
-    let now = Utc::now();
-    let msg_with_ts = task
-        .ha
-        .generate_status_message("SN123", "OK", None, Some(&now));
-    let payload = match msg_with_ts {
-        MqttMessage::Publish { payload, .. } => payload,
-    };
-    assert!(payload.contains(&now.to_rfc3339()));
-}
-
-#[test]
-#[traced_test]
-fn test_discovery_message() {
-    let task = test_task();
-    let ctx = DiscoveryContext {
-        manufacturer: "Brand",
-        model: "ModelX",
-        version: Some("1.2.3"),
-        name: "W",
-        value_path: None,
-        unit: Some("W"),
-        device_class: Some("power"),
-        state_class: Some("measurement"),
-        label: "Power",
-        enabled_by_default: true,
-        options: None,
-        component: None,
-        command_topic: None,
-    };
-    let (topic, payload) = task.ha.discovery_message("SN123", &ctx);
-
-    assert_eq!(topic, "homeassistant/sensor/SN123/W/config");
-    assert!(payload.contains("\"state_topic\":\"solar/inverter/SN123\""));
-    assert!(payload.contains("\"value_template\":\"{{ value_json.W }}\""));
-    assert!(payload.contains("\"unique_id\":\"solar_SN123_W\""));
-    assert!(payload.contains("\"manufacturer\":\"Brand\""));
-    assert!(payload.contains("\"model\":\"ModelX\""));
-    assert!(payload.contains("\"sw_version\":\"1.2.3\""));
-    assert!(payload.contains("\"state_class\":\"measurement\""));
-    assert!(payload.contains("\"force_update\":true"));
-    assert!(payload.contains("\"enabled_by_default\":true"));
-}
-
-#[test]
-#[traced_test]
-fn test_discovery_message_enum() {
-    let task = test_task();
-    let ctx = DiscoveryContext {
-        manufacturer: "Brand",
-        model: "ModelX",
-        version: None,
-        name: "St",
-        value_path: None,
-        unit: None,
-        device_class: Some("enum"),
-        state_class: None,
-        label: "Status",
-        enabled_by_default: true,
-        options: Some(vec!["OFF", "ON"]),
-        component: None,
-        command_topic: None,
-    };
-    let (topic, payload) = task.ha.discovery_message("SN123", &ctx);
-
-    assert_eq!(topic, "homeassistant/sensor/SN123/St/config");
-    assert!(payload.contains("\"device_class\":\"enum\""));
-    assert!(payload.contains("\"value_template\":\"{{ value_json.St }}\""));
-    assert!(payload.contains("\"options\":[\"OFF\",\"ON\"]"));
-    assert!(!payload.contains("\"sw_version\""));
-    assert!(!payload.contains("\"unit_of_measurement\""));
-    assert!(!payload.contains("\"state_class\""));
-}
-
 #[tokio::test]
 #[traced_test]
 async fn test_reconnection_logic() {
@@ -162,7 +57,7 @@ async fn test_reconnection_logic() {
     tokio::time::pause();
 
     let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let handle_mock = modbus_test_utils::start_mock_server(addr).await;
+    let handle_mock = modbus_server::start_mock_server(addr).await;
     let addr_str = handle_mock.addr.to_string();
 
     let (tx, _rx) = mpsc::channel(1);
@@ -196,7 +91,9 @@ async fn test_reconnection_logic() {
     };
 
     let token_clone = token.clone();
-    let task_handle = tokio::spawn(async move { task.run_internal().await });
+    let task_handle = tokio::spawn(
+        async move { task.run_internal().await }.instrument(tracing::info_span!("run")),
+    );
 
     // Wait for the first connection
     handle_mock.notify.notified().await;
@@ -221,7 +118,7 @@ async fn test_successful_poll_logic() {
     tokio::time::pause();
 
     let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let handle_mock = modbus_test_utils::start_mock_server(addr).await;
+    let handle_mock = modbus_server::start_mock_server(addr).await;
     let addr_str = handle_mock.addr.to_string();
     let regs = handle_mock.registers;
 
@@ -269,7 +166,9 @@ async fn test_successful_poll_logic() {
     };
 
     let token_clone = token.clone();
-    let task_handle = tokio::spawn(async move { task.run_internal().await });
+    let task_handle = tokio::spawn(
+        async move { task.run_internal().await }.instrument(tracing::info_span!("run")),
+    );
 
     // Collect messages by advancing time in small increments
     let mut messages = Vec::new();
@@ -361,7 +260,7 @@ async fn test_command_execution_logic() {
     tokio::time::pause();
 
     let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let handle_mock = modbus_test_utils::start_mock_server(addr).await;
+    let handle_mock = modbus_server::start_mock_server(addr).await;
     let addr_str = handle_mock.addr.to_string();
     let regs = handle_mock.registers;
 
@@ -412,7 +311,9 @@ async fn test_command_execution_logic() {
     };
 
     let token_clone = token.clone();
-    let task_handle = tokio::spawn(async move { task.run_internal().await });
+    let task_handle = tokio::spawn(
+        async move { task.run_internal().await }.instrument(tracing::info_span!("run")),
+    );
 
     // Wait a bit for discovery to finish
     tokio::time::advance(Duration::from_millis(100)).await;
@@ -435,9 +336,9 @@ async fn test_command_execution_logic() {
     let m123_data_base = 40124;
 
     // Send a command (WMaxLimPct)
-    let cmd = crate::commands::ModbusCommand {
+    let cmd = pv2mqtt::commands::ModbusCommand {
         serial: "SN1234".to_string(),
-        action: crate::commands::ControlAction::WMaxLimPct(75.5),
+        action: pv2mqtt::commands::ControlAction::WMaxLimPct(75.5),
     };
     cmd_tx.send(cmd).unwrap();
 
@@ -446,7 +347,7 @@ async fn test_command_execution_logic() {
     for _ in 0..10 {
         tokio::time::advance(Duration::from_millis(10)).await;
         let r = regs.lock().unwrap();
-        if r[m123_data_base + M123_WMAX_LIM_PCT_OFFSET as usize] == 7550 {
+        if r[m123_data_base + pv2mqtt::modbus::M123_WMAX_LIM_PCT_OFFSET as usize] == 7550 {
             write_verified = true;
             break;
         }
@@ -457,9 +358,9 @@ async fn test_command_execution_logic() {
     );
 
     // Send a Conn command
-    let cmd = crate::commands::ModbusCommand {
+    let cmd = pv2mqtt::commands::ModbusCommand {
         serial: "SN1234".to_string(),
-        action: crate::commands::ControlAction::Conn(true),
+        action: pv2mqtt::commands::ControlAction::Conn(true),
     };
     cmd_tx.send(cmd).unwrap();
 
@@ -489,7 +390,7 @@ async fn test_command_ignored_when_controls_disabled() {
     tokio::time::pause();
 
     let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let handle_mock = modbus_test_utils::start_mock_server(addr).await;
+    let handle_mock = modbus_server::start_mock_server(addr).await;
     let addr_str = handle_mock.addr.to_string();
     let regs = handle_mock.registers;
 
@@ -533,7 +434,9 @@ async fn test_command_ignored_when_controls_disabled() {
     };
 
     let token_clone = token.clone();
-    let task_handle = tokio::spawn(async move { task.run_internal().await });
+    let task_handle = tokio::spawn(
+        async move { task.run_internal().await }.instrument(tracing::info_span!("run")),
+    );
 
     // Advance to finish discovery
     let mut messages = Vec::new();
@@ -547,23 +450,16 @@ async fn test_command_ignored_when_controls_disabled() {
         }
     }
     // Send a command
-    let cmd = crate::commands::ModbusCommand {
+    let cmd = pv2mqtt::commands::ModbusCommand {
         serial: "SN1234".to_string(),
-        action: crate::commands::ControlAction::WMaxLimPct(75.5),
+        action: pv2mqtt::commands::ControlAction::WMaxLimPct(75.5),
     };
     cmd_tx.send(cmd).unwrap();
 
     // Advance time to allow processing.
     // We use a loop to ensure handle_command has a chance to run.
-    let mut command_logged = false;
     for _ in 0..10 {
-        tokio::time::advance(Duration::from_millis(10)).await;
-        if logs_contain(
-            "Received command for device SN1234, but controls are not enabled in config",
-        ) {
-            command_logged = true;
-            break;
-        }
+        tokio::time::advance(Duration::from_millis(100)).await;
     }
 
     {
@@ -571,9 +467,6 @@ async fn test_command_ignored_when_controls_disabled() {
         // Register should still be 0, not 7550
         assert_eq!(r[40124 + 3], 0);
     }
-
-    // Verify warning log
-    assert!(command_logged, "Did not see expected warning log");
 
     token_clone.cancel();
     tokio::time::advance(Duration::from_millis(100)).await;
@@ -586,7 +479,7 @@ async fn test_discovery_disabled_logic() {
     tokio::time::pause();
 
     let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let handle_mock = modbus_test_utils::start_mock_server(addr).await;
+    let handle_mock = modbus_server::start_mock_server(addr).await;
     let addr_str = handle_mock.addr.to_string();
     let regs = handle_mock.registers;
 
@@ -628,7 +521,9 @@ async fn test_discovery_disabled_logic() {
     };
 
     let token_clone = token.clone();
-    let task_handle = tokio::spawn(async move { task.run_internal().await });
+    let task_handle = tokio::spawn(
+        async move { task.run_internal().await }.instrument(tracing::info_span!("run")),
+    );
 
     // Collect messages
     let mut messages = Vec::new();

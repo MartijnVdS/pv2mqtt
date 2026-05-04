@@ -24,29 +24,29 @@ use tokio_serial::SerialStream;
 use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, debug, error, info, info_span, warn};
 
-const COMMAND_POLL_DELAY_MILLIS: u64 = 250;
-const CONNECT_TIMEOUT_SECS: u64 = 10;
-const DEFAULT_IDLE_SLEEP_SECS: u64 = 3600;
-const MIN_SLEEP_MILLIS: u64 = 10;
-const POLL_TIMEOUT_SECS: u64 = 10;
-const READ_TIMEOUT_SECS: u64 = 10;
-const RECONNECT_TIMEOUT_SECS: u64 = 10;
+pub const COMMAND_POLL_DELAY_MILLIS: u64 = 250;
+pub const CONNECT_TIMEOUT_SECS: u64 = 10;
+pub const DEFAULT_IDLE_SLEEP_SECS: u64 = 3600;
+pub const MIN_SLEEP_MILLIS: u64 = 10;
+pub const POLL_TIMEOUT_SECS: u64 = 10;
+pub const READ_TIMEOUT_SECS: u64 = 10;
+pub const RECONNECT_TIMEOUT_SECS: u64 = 10;
 
 // SunSpec Model 123 (Immediate Controls) Data-Relative Offsets (Spec Offset - 2)
 // These match the 'offset' attribute in SunSpec smdx_00123.xml
-const M123_CONN_OFFSET: u16 = 2;
-const M123_WMAX_LIM_PCT_OFFSET: u16 = 3;
-const M123_WMAX_LIM_ENA_OFFSET: u16 = 7;
-const M123_WMAX_LIM_PCT_SF_OFFSET: u16 = 21;
+pub const M123_CONN_OFFSET: u16 = 2;
+pub const M123_WMAX_LIM_PCT_OFFSET: u16 = 3;
+pub const M123_WMAX_LIM_ENA_OFFSET: u16 = 7;
+pub const M123_WMAX_LIM_PCT_SF_OFFSET: u16 = 21;
 
 pub struct ConnectionTask {
-    config: ConnectionConfig,
-    mqtt_tx: mpsc::Sender<MqttMessage>,
-    ha: HomeAssistantIntegration,
-    ha_enabled: bool,
-    token: CancellationToken,
-    root_cert_store: Arc<rustls::RootCertStore>,
-    cmd_rx: tokio::sync::broadcast::Receiver<crate::commands::ModbusCommand>,
+    pub config: ConnectionConfig,
+    pub mqtt_tx: mpsc::Sender<MqttMessage>,
+    pub ha: HomeAssistantIntegration,
+    pub ha_enabled: bool,
+    pub token: CancellationToken,
+    pub root_cert_store: Arc<rustls::RootCertStore>,
+    pub cmd_rx: tokio::sync::broadcast::Receiver<crate::commands::ModbusCommand>,
 }
 
 impl ConnectionTask {
@@ -77,7 +77,7 @@ impl ConnectionTask {
         self.run_internal().instrument(span).await
     }
 
-    async fn run_internal(self) -> Result<()> {
+    pub async fn run_internal(self) -> Result<()> {
         info!("Starting connection task");
 
         let mut devices: Vec<DeviceState> = self

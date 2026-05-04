@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 use std::io;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -5,17 +7,11 @@ use std::sync::{Arc, Mutex};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_modbus::prelude::*;
 use tokio_modbus::server::tcp::Server;
-use tracing::{debug, error};
+use tokio_rustls::TlsAcceptor;
+use tracing::{debug, error, info};
 
 pub struct MockService {
     pub registers: Arc<Mutex<Vec<u16>>>,
-}
-
-pub struct MockServerHandle {
-    pub registers: Arc<Mutex<Vec<u16>>>,
-    pub connections: Arc<AtomicU32>,
-    pub addr: SocketAddr,
-    pub notify: Arc<tokio::sync::Notify>,
 }
 
 impl tokio_modbus::server::Service for MockService {
@@ -57,6 +53,13 @@ impl tokio_modbus::server::Service for MockService {
     }
 }
 
+pub struct MockServerHandle {
+    pub registers: Arc<Mutex<Vec<u16>>>,
+    pub connections: Arc<AtomicU32>,
+    pub addr: SocketAddr,
+    pub notify: Arc<tokio::sync::Notify>,
+}
+
 pub async fn start_mock_server(addr: SocketAddr) -> MockServerHandle {
     let registers = Arc::new(Mutex::new(vec![0u16; 60000]));
     let regs_clone = registers.clone();
@@ -81,6 +84,63 @@ pub async fn start_mock_server(addr: SocketAddr) -> MockServerHandle {
             async move {
                 debug!("Connected: {}", addr);
                 Ok(Some((MockService { registers: regs }, stream)))
+            }
+        };
+
+        let on_process_error = |err: io::Error| {
+            error!("Process error: {}", err);
+        };
+
+        server.serve(&on_connected, on_process_error).await.unwrap();
+    });
+
+    MockServerHandle {
+        registers,
+        connections,
+        addr: local_addr,
+        notify,
+    }
+}
+
+pub async fn start_tls_mock_server(
+    addr: SocketAddr,
+    tls_acceptor: TlsAcceptor,
+) -> MockServerHandle {
+    let registers = Arc::new(Mutex::new(vec![0u16; 60000]));
+    let regs_clone = registers.clone();
+    let connections = Arc::new(AtomicU32::new(0));
+    let conn_clone = connections.clone();
+    let notify = Arc::new(tokio::sync::Notify::new());
+    let notify_clone = notify.clone();
+
+    let listener = TcpListener::bind(addr)
+        .await
+        .expect("Failed to bind mock server");
+    let local_addr = listener.local_addr().unwrap();
+
+    tokio::spawn(async move {
+        let server = Server::new(listener);
+
+        let on_connected = move |stream: TcpStream, addr: SocketAddr| {
+            let regs = regs_clone.clone();
+            let notify = notify_clone.clone();
+            let conn_clone = conn_clone.clone();
+            let acceptor = tls_acceptor.clone();
+
+            async move {
+                debug!("Connected: {}", addr);
+                match acceptor.accept(stream).await {
+                    Ok(tls_stream) => {
+                        info!("TLS handshake successful for {}", addr);
+                        conn_clone.fetch_add(1, Ordering::SeqCst);
+                        notify.notify_waiters();
+                        Ok(Some((MockService { registers: regs }, tls_stream)))
+                    }
+                    Err(e) => {
+                        error!("TLS handshake failed for {}: {}", addr, e);
+                        Err(e)
+                    }
+                }
             }
         };
 
