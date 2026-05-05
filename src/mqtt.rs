@@ -214,7 +214,7 @@ impl MqttTask {
             )));
         }
 
-        let (client, eventloop) = AsyncClient::builder(mqttoptions).capacity(20).build_async();
+        let (client, eventloop) = AsyncClient::builder(mqttoptions).capacity(20).build();
 
         info!(
             "MQTT task starting connection to {}",

@@ -18,7 +18,7 @@ tokio = { version = "1", features = [
 tokio-util = "0.7"
 tokio-modbus = { version = "0.17", features = ["tcp", "rtu"] }
 tokio-serial = "5.4"
-rumqttc-next = { version = "0.31", features = ["url"] }
+rumqttc-next = { version = "0.33", features = ["url"] }
 tokio-rustls = { version = "0.26", features = ["logging"] }
 rustls-native-certs = "0.8"
 rustls = { version = "0.23" }
@@ -53,7 +53,7 @@ opt-level = "z"
 
 [dev-dependencies]
 approx = "0.5"
-rcgen = "0.13"
+rcgen = "0.14"
 tokio = { version = "1", features = [ "test-util" ] }
 tokio-modbus = { version = "0.17", features = [ "server", "tcp-server" ] }
 tracing-test = "0.2"

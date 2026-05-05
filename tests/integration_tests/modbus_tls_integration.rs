@@ -21,7 +21,7 @@ async fn test_tls_handshake_failure() {
     let subject_alt_names = vec!["localhost".to_string(), "127.0.0.1".to_string()];
     let certified_key = generate_simple_self_signed(subject_alt_names).unwrap();
     let cert_der = certified_key.cert.der().to_vec();
-    let key_der = certified_key.key_pair.serialize_der();
+    let key_der = certified_key.signing_key.serialize_der();
 
     // Create a TlsAcceptor for the mock server
     let server_config = rustls::ServerConfig::builder()
