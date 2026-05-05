@@ -1,4 +1,5 @@
 use crate::config::DeviceConfig;
+use crate::models::ActiveControlModel;
 use chrono::{DateTime, Utc};
 use std::sync::Arc;
 use std::time::Instant;
@@ -15,6 +16,7 @@ pub struct DeviceState {
     pub model: Option<String>,
     pub version: Option<String>,
     pub supported_model: Option<u16>,
+    pub active_control: ActiveControlModel,
     pub device: Option<AsyncDevice<Arc<Mutex<ModbusContext>>>>,
 }
 

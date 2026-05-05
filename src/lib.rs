@@ -7,19 +7,21 @@ pub mod homeassistant;
 pub mod modbus;
 pub mod models;
 pub mod mqtt;
-pub mod tasks;
+pub mod taskmanager;
 pub mod tls;
 
 use crate::config::Config;
 use crate::error::{Pv2MqttError, Result};
-use crate::tasks::TaskManager;
+use crate::taskmanager::TaskManager;
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 
 pub fn get_config_path() -> Result<String> {
     let args: Vec<String> = std::env::args().collect();
     match args.len() {
+        // No command line arguments: default to /etc
         1 => Ok("/etc/pv2mqtt.conf".to_string()),
+        // One command line argument: use that as the config file name
         2 => Ok(args[1].clone()),
         _ => Err(Pv2MqttError::Config(
             "Usage: pv2mqtt [config_file]".to_string(),

@@ -121,7 +121,7 @@ impl Config {
                         device.unit_id, MAX_MODBUS_UNIT_ID, conn.name
                     )));
                 }
-                if !(1..=MAX_POLL_SECS).contains(&device.interval) {
+                if device.interval < 1 || device.interval > MAX_POLL_SECS {
                     return Err(Pv2MqttError::Config(format!(
                         "Device polling interval {} is out of reasonable range (1-{}s) in connection '{}'",
                         device.interval, MAX_POLL_SECS, conn.name

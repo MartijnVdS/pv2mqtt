@@ -1,6 +1,6 @@
 use super::{ConnectionTask, DeviceState, POLL_TIMEOUT_SECS};
 use crate::error::{Pv2MqttError, Result};
-use crate::models::{InverterData, poll_and_apply};
+use crate::models::{ActiveControlModel, InverterData, poll_and_apply};
 use crate::mqtt::MqttMessage;
 use chrono::Utc;
 use std::sync::Arc;
@@ -44,14 +44,19 @@ impl ConnectionTask {
                 Ok(Ok(mut data)) => {
                     info!("Successfully polled (Serial: {})", serial);
 
-                    // Optionally poll Model 123 for controls status
-                    if device_state.config.enable_controls {
-                        match poll_and_apply(123, device, &mut data).await {
-                            Ok(_) => {}
-                            Err(e) => {
+                    // Optionally poll the active control model for status
+                    match device_state.active_control {
+                        ActiveControlModel::Model123 { .. } => {
+                            if let Err(e) = poll_and_apply(123, device, &mut data).await {
                                 warn!("Failed to poll controls (Model 123) for {}: {}", serial, e);
                             }
                         }
+                        ActiveControlModel::Model704 { .. } => {
+                            if let Err(e) = poll_and_apply(704, device, &mut data).await {
+                                warn!("Failed to poll controls (Model 704) for {}: {}", serial, e);
+                            }
+                        }
+                        ActiveControlModel::None => {}
                     }
 
                     device_state.last_success_timestamp = Some(Utc::now());

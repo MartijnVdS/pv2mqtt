@@ -7,8 +7,20 @@ pub const SUNSPEC_UNIMPLEMENTED_U32: u32 = 0xFFFFFFFF;
 pub const SUNSPEC_UNIMPLEMENTED_U16: u16 = 0xFFFF;
 pub const SUNSPEC_UNIMPLEMENTED_I16: i16 = -32768;
 
+#[derive(Debug, Serialize, Default, Clone, Copy, PartialEq, Eq)]
+pub enum ActiveControlModel {
+    #[default]
+    None,
+    Model123 {
+        base_addr: u16,
+    },
+    Model704 {
+        base_addr: u16,
+    },
+}
+
 #[derive(Debug, Serialize, Default, Clone)]
-pub struct Model123Data {
+pub struct ControlData {
     #[serde(rename = "Conn")]
     pub conn: Option<bool>,
     #[serde(rename = "WMaxLimPct")]
@@ -55,7 +67,7 @@ pub struct InverterData {
     #[serde(rename = "St")]
     pub st: String,
     #[serde(rename = "Controls", skip_serializing_if = "Option::is_none")]
-    pub controls: Option<Model123Data>,
+    pub controls: Option<ControlData>,
 }
 
 pub fn apply_sf(val: u16, sf: i16) -> Option<f32> {
@@ -77,6 +89,13 @@ pub fn apply_sf_u32_f64(val: u32, sf: i16) -> Option<f64> {
         return None;
     }
     Some(val as f64 * 10f64.powi(sf as i32))
+}
+
+pub fn apply_sf_u16_sf_opt(val: Option<u16>, sf: Option<i16>) -> Option<f32> {
+    match (val, sf) {
+        (Some(v), Some(s)) => apply_sf(v, s),
+        _ => None,
+    }
 }
 
 pub fn apply_sf_i16_opt(val: Option<i16>, sf: Option<i16>) -> Option<f32> {

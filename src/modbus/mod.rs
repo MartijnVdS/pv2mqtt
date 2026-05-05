@@ -39,6 +39,12 @@ pub const M123_WMAX_LIM_PCT_OFFSET: u16 = 3;
 pub const M123_WMAX_LIM_ENA_OFFSET: u16 = 7;
 pub const M123_WMAX_LIM_PCT_SF_OFFSET: u16 = 21;
 
+// SunSpec Model 704 (DER AC Controls) Data-Relative Offsets (Spec Offset - 2)
+// These match the 'offset' attribute in the SunSpec specification
+pub const M704_WMAX_LIM_ENA_OFFSET: u16 = 14;
+pub const M704_WMAX_LIM_PCT_OFFSET: u16 = 15;
+pub const M704_WMAX_LIM_PCT_SF_OFFSET: u16 = 54;
+
 pub struct ConnectionTask {
     pub config: ConnectionConfig,
     pub mqtt_tx: mpsc::Sender<MqttMessage>,
@@ -93,6 +99,7 @@ impl ConnectionTask {
                 model: None,
                 version: None,
                 supported_model: None,
+                active_control: crate::models::ActiveControlModel::None,
                 device: None,
             })
             .collect();

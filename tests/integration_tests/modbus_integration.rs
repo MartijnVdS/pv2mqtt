@@ -4,7 +4,8 @@ use crate::common::modbus_server;
 use pv2mqtt::config::{ConnectionConfig, DeviceConfig, ModbusConfig};
 use pv2mqtt::homeassistant::HomeAssistantIntegration;
 use pv2mqtt::modbus::{
-    ConnectionTask, M123_CONN_OFFSET, M123_WMAX_LIM_PCT_SF_OFFSET, RECONNECT_TIMEOUT_SECS,
+    ConnectionTask, M123_CONN_OFFSET, M123_WMAX_LIM_PCT_SF_OFFSET, M704_WMAX_LIM_PCT_OFFSET,
+    M704_WMAX_LIM_PCT_SF_OFFSET, RECONNECT_TIMEOUT_SECS,
 };
 use pv2mqtt::mqtt::MqttMessage;
 use std::sync::Arc;
@@ -560,6 +561,102 @@ async fn test_discovery_disabled_logic() {
         !messages.is_empty(),
         "Some messages (data/status) should still be sent"
     );
+
+    token_clone.cancel();
+    tokio::time::advance(Duration::from_millis(100)).await;
+    let _ = task_handle.await.unwrap();
+}
+
+#[tokio::test]
+#[traced_test]
+async fn test_model_704_command_execution_logic() {
+    tokio::time::pause();
+
+    let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+    let handle_mock = modbus_server::start_mock_server(addr).await;
+    let addr_str = handle_mock.addr.to_string();
+    let regs = handle_mock.registers;
+
+    {
+        let mut r = regs.lock().unwrap();
+        let next_addr = setup_mock_sunspec_registers(&mut r);
+
+        // Model 704 (DER AC Controls)
+        r[next_addr] = 704;
+        r[next_addr + 1] = 65;
+        // SF = -2 at offset 54 (Relative to data block start at next_addr + 2)
+        r[next_addr + 2 + M704_WMAX_LIM_PCT_SF_OFFSET as usize] = 0xFFFE;
+
+        // End of models marker
+        r[next_addr + 67] = 0xFFFF;
+        r[next_addr + 68] = 0;
+    }
+
+    let (tx, mut rx) = mpsc::channel(100);
+    let token = CancellationToken::new();
+    let root_cert_store = Arc::new(rustls::RootCertStore::empty());
+
+    let (cmd_tx, cmd_rx) = tokio::sync::broadcast::channel(1);
+    let task = ConnectionTask {
+        config: ConnectionConfig {
+            name: "test-704".to_string(),
+            modbus: ModbusConfig::Tcp {
+                address: addr_str,
+                tls: false,
+                ca_path: None,
+                cert_path: None,
+                key_path: None,
+            },
+            devices: vec![DeviceConfig {
+                unit_id: 1,
+                interval: 60,
+                enable_controls: true,
+            }],
+            keep_alive_interval: None,
+        },
+        mqtt_tx: tx,
+        ha: HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string()),
+        ha_enabled: true,
+        token: token.clone(),
+        root_cert_store,
+        cmd_rx,
+    };
+
+    let token_clone = token.clone();
+    let task_handle = tokio::spawn(
+        async move { task.run_internal().await }.instrument(tracing::info_span!("run")),
+    );
+
+    tokio::time::advance(Duration::from_millis(100)).await;
+    let mut messages = Vec::new();
+    for _ in 0..100 {
+        tokio::time::advance(Duration::from_millis(10)).await;
+        while let Ok(msg) = rx.try_recv() {
+            messages.push(msg);
+        }
+        if !messages.is_empty() {
+            break;
+        }
+    }
+
+    // Send a command (WMaxLimPct)
+    let cmd = pv2mqtt::commands::ModbusCommand {
+        serial: "SN1234".to_string(),
+        action: pv2mqtt::commands::ControlAction::WMaxLimPct(80.0),
+    };
+    cmd_tx.send(cmd).unwrap();
+
+    let mut write_verified = false;
+    for _ in 0..10 {
+        tokio::time::advance(Duration::from_millis(100)).await;
+        let r = regs.lock().unwrap();
+        // Base addr for 704 data is 40124 (next_addr + 2)
+        if r[40124 + M704_WMAX_LIM_PCT_OFFSET as usize] == 8000 {
+            write_verified = true;
+            break;
+        }
+    }
+    assert!(write_verified, "Model 704 WMaxLimPct write did not occur");
 
     token_clone.cancel();
     tokio::time::advance(Duration::from_millis(100)).await;

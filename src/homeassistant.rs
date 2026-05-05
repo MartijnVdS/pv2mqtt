@@ -68,7 +68,7 @@ impl HomeAssistantIntegration {
         model: &str,
         version: Option<&str>,
         model_id: Option<u16>,
-        enable_controls: bool,
+        active_control: crate::models::ActiveControlModel,
     ) -> Vec<MqttMessage> {
         let mut messages = Vec::new();
         let mut sensors = vec![
@@ -197,16 +197,24 @@ impl HomeAssistantIntegration {
             });
         }
 
-        if enable_controls {
-            let controls = vec![
-                (
+        if active_control != crate::models::ActiveControlModel::None {
+            let mut controls = Vec::new();
+
+            if matches!(
+                active_control,
+                crate::models::ActiveControlModel::Model123 { .. }
+            ) {
+                controls.push((
                     "Conn",
                     "switch",
                     None,
                     None,
                     "Connection",
                     format!("{}/inverter/{}/set/Conn", self.topic_prefix, serial),
-                ),
+                ));
+            }
+
+            controls.extend(vec![
                 (
                     "WMaxLimPct",
                     "number",
@@ -223,7 +231,7 @@ impl HomeAssistantIntegration {
                     "Active Power Limit Enable",
                     format!("{}/inverter/{}/set/WMaxLim_Ena", self.topic_prefix, serial),
                 ),
-            ];
+            ]);
 
             for (name, component, device_class, state_class, label, cmd_topic) in controls {
                 let ctx = DiscoveryContext {
@@ -341,7 +349,7 @@ mod tests {
             "Model",
             Some("1.0"),
             Some(101),
-            false,
+            crate::models::ActiveControlModel::None,
         );
 
         // Calculation:
@@ -364,8 +372,14 @@ mod tests {
     #[test]
     fn test_generate_discovery_messages_m103_with_controls() {
         let ha = HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string());
-        let msgs =
-            ha.generate_discovery_messages("SN123", "Manufacturer", "Model", None, Some(103), true);
+        let msgs = ha.generate_discovery_messages(
+            "SN123",
+            "Manufacturer",
+            "Model",
+            None,
+            Some(103),
+            crate::models::ActiveControlModel::Model123 { base_addr: 40000 },
+        );
 
         // Calculation:
         // - Core sensors: 6
@@ -393,6 +407,34 @@ mod tests {
     }
 
     #[test]
+    fn test_generate_discovery_messages_m704_with_controls() {
+        let ha = HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string());
+        let msgs = ha.generate_discovery_messages(
+            "SN123",
+            "Manufacturer",
+            "Model",
+            None,
+            Some(103),
+            crate::models::ActiveControlModel::Model704 { base_addr: 40000 },
+        );
+
+        // Calculation:
+        // - Core sensors: 6
+        // - Phase A: 2
+        // - Phase B: 2
+        // - Phase C: 2
+        // - Controls (WMaxLimPct, WMaxLim_Ena): 2 (NO Conn)
+        // Total: 6 + 2 + 2 + 2 + 2 = 14
+        assert_eq!(msgs.len(), 14);
+
+        // Verify NO Conn
+        for msg in &msgs {
+            let MqttMessage::Publish { topic, .. } = msg;
+            assert!(!topic.contains("Conn"));
+        }
+    }
+
+    #[test]
     fn test_generate_discovery_messages_cleanup() {
         let ha = HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string());
         let msgs = ha.generate_discovery_messages(
@@ -401,7 +443,7 @@ mod tests {
             "Model",
             None,
             Some(101),
-            false, // Controls disabled -> should generate cleanup
+            crate::models::ActiveControlModel::None, // Controls disabled -> should generate cleanup
         );
 
         // Calculation:

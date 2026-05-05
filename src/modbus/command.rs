@@ -1,8 +1,10 @@
 use super::{
     COMMAND_POLL_DELAY_MILLIS, ConnectionTask, DeviceState, M123_CONN_OFFSET,
     M123_WMAX_LIM_ENA_OFFSET, M123_WMAX_LIM_PCT_OFFSET, M123_WMAX_LIM_PCT_SF_OFFSET,
+    M704_WMAX_LIM_ENA_OFFSET, M704_WMAX_LIM_PCT_OFFSET, M704_WMAX_LIM_PCT_SF_OFFSET,
 };
 use crate::error::{ModbusError, Pv2MqttError, Result};
+use crate::models::ActiveControlModel;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
@@ -35,17 +37,6 @@ impl ConnectionTask {
             return;
         }
 
-        let device = match &device_state.device {
-            Some(d) => d,
-            None => {
-                warn!(
-                    "Received command for device {}, but it is not currently connected",
-                    cmd.serial
-                );
-                return;
-            }
-        };
-
         let unit_id = device_state.config.unit_id;
         let action = cmd.action;
 
@@ -54,27 +45,48 @@ impl ConnectionTask {
         let res: Result<()> = async {
             use crate::commands::ControlAction;
 
-            if device.models.m123.addr == 0 {
-                return Err(Pv2MqttError::Modbus(ModbusError::from(
-                    std::io::Error::other("Model 123 not supported by device"),
-                )));
-            }
+            let (base_addr, conn_off, pct_off, ena_off, sf_off) = match device_state.active_control
+            {
+                ActiveControlModel::Model123 { base_addr } => (
+                    base_addr,
+                    Some(M123_CONN_OFFSET),
+                    M123_WMAX_LIM_PCT_OFFSET,
+                    M123_WMAX_LIM_ENA_OFFSET,
+                    M123_WMAX_LIM_PCT_SF_OFFSET,
+                ),
+                ActiveControlModel::Model704 { base_addr } => (
+                    base_addr,
+                    None,
+                    M704_WMAX_LIM_PCT_OFFSET,
+                    M704_WMAX_LIM_ENA_OFFSET,
+                    M704_WMAX_LIM_PCT_SF_OFFSET,
+                ),
+                ActiveControlModel::None => {
+                    return Err(Pv2MqttError::Modbus(ModbusError::from(
+                        std::io::Error::other("Controls not supported or identified for device"),
+                    )));
+                }
+            };
 
-            let base_addr = device.models.m123.addr;
             let mut modbus = ctx.lock().await;
             modbus.set_slave(Slave(unit_id));
 
             match action {
                 ControlAction::Conn(connect) => {
+                    let offset = conn_off.ok_or_else(|| {
+                        Pv2MqttError::Modbus(ModbusError::from(std::io::Error::other(
+                            "Connect/Disconnect command not supported by this control model",
+                        )))
+                    })?;
                     let val = if connect { 1 } else { 0 };
                     debug!(
                         "Writing Conn={} (val={}) to address {}",
                         connect,
                         val,
-                        base_addr + M123_CONN_OFFSET
+                        base_addr + offset
                     );
                     modbus
-                        .write_multiple_registers(base_addr + M123_CONN_OFFSET, &[val])
+                        .write_multiple_registers(base_addr + offset, &[val])
                         .await
                         .map_err(ModbusError::from)?
                         .map_err(|e| {
@@ -83,7 +95,7 @@ impl ConnectionTask {
                 }
                 ControlAction::WMaxLimPct(pct) => {
                     let regs = modbus
-                        .read_holding_registers(base_addr + M123_WMAX_LIM_PCT_SF_OFFSET, 1)
+                        .read_holding_registers(base_addr + sf_off, 1)
                         .await
                         .map_err(ModbusError::from)?
                         .map_err(|e| {
@@ -99,10 +111,10 @@ impl ConnectionTask {
                         "Writing WMaxLimPct={} (raw={}) to address {}",
                         pct,
                         raw,
-                        base_addr + M123_WMAX_LIM_PCT_OFFSET
+                        base_addr + pct_off
                     );
                     modbus
-                        .write_multiple_registers(base_addr + M123_WMAX_LIM_PCT_OFFSET, &[raw])
+                        .write_multiple_registers(base_addr + pct_off, &[raw])
                         .await
                         .map_err(ModbusError::from)?
                         .map_err(|e| {
@@ -118,10 +130,10 @@ impl ConnectionTask {
                         "Writing WMaxLim_Ena={} (val={}) to address {}",
                         enable,
                         val,
-                        base_addr + M123_WMAX_LIM_ENA_OFFSET
+                        base_addr + ena_off
                     );
                     modbus
-                        .write_multiple_registers(base_addr + M123_WMAX_LIM_ENA_OFFSET, &[val])
+                        .write_multiple_registers(base_addr + ena_off, &[val])
                         .await
                         .map_err(ModbusError::from)?
                         .map_err(|e| {

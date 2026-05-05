@@ -120,6 +120,7 @@ fn handle_incoming_publish(
     // Expected topic: {prefix}/inverter/{serial}/set/{register}
     let parts: Vec<&str> = topic.split('/').collect();
     if parts.len() < 5 || parts[0] != topic_prefix || parts[1] != "inverter" || parts[3] != "set" {
+        warn!("Received message for an unknown MQTT topic");
         return;
     }
 

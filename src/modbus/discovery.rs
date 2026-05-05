@@ -1,6 +1,6 @@
 use super::{ConnectionTask, DeviceState, POLL_TIMEOUT_SECS};
 use crate::error::{ModbusError, Pv2MqttError, Result};
-use crate::models::SUPPORTED_MODELS;
+use crate::models::{ActiveControlModel, SUPPORTED_MODELS};
 use std::sync::Arc;
 use std::time::Duration;
 use sunspec::client::AsyncClient;
@@ -51,6 +51,11 @@ impl ConnectionTask {
 
             // Find supported inverter model
             let available_models = device.models.supported_model_ids();
+            info!("Device supports SunSpec models: {}", available_models
+                .iter()
+                .map(|id| id.to_string())
+                .collect::<Vec<_>>()
+                .join(", "));
             device_state.supported_model = SUPPORTED_MODELS
                 .iter()
                 .find(|&&id| available_models.contains(&id))
@@ -68,12 +73,25 @@ impl ConnectionTask {
                 )));
             }
 
-            // Check if controls are enabled but not supported by hardware
-            if device_state.config.enable_controls && !available_models.contains(&123) {
-                warn!(
-                    "Device {} has controls enabled in config, but Model 123 is not supported by hardware. Available models: {:?}",
-                    unit_id, available_models
-                );
+            // Check if controls are enabled and identify which model to use
+            device_state.active_control = ActiveControlModel::None;
+            if device_state.config.enable_controls {
+                if available_models.contains(&704) {
+                    info!("Using SunSpec Model 704 for controls on unit {}", unit_id);
+                    device_state.active_control = ActiveControlModel::Model704 {
+                        base_addr: device.models.m704.addr,
+                    };
+                } else if available_models.contains(&123) {
+                    info!("Using SunSpec Model 123 for controls on unit {}", unit_id);
+                    device_state.active_control = ActiveControlModel::Model123 {
+                        base_addr: device.models.m123.addr,
+                    };
+                } else {
+                    warn!(
+                        "Device {} has controls enabled in config, but neither Model 704 nor Model 123 is supported by hardware.",
+                        unit_id
+                    );
+                }
             }
 
             // Try to read Model 1 for metadata/serial
@@ -113,8 +131,6 @@ impl ConnectionTask {
                         device_state.manufacturer = Some(manufacturer.clone());
                         device_state.model = Some(model.clone());
                         device_state.version = version_opt.clone();
-                        let has_controls =
-                            device_state.config.enable_controls && available_models.contains(&123);
 
                         if self.ha_enabled {
                             let messages = self.ha.generate_discovery_messages(
@@ -123,7 +139,7 @@ impl ConnectionTask {
                                 &model,
                                 version_opt.as_deref(),
                                 device_state.supported_model,
-                                has_controls,
+                                device_state.active_control,
                             );
 
                             for msg in messages {
