@@ -159,6 +159,7 @@ pub struct DeviceConfig {
     pub interval: u64,
     #[serde(default)]
     pub enable_controls: bool,
+    pub preferred_model: Option<u16>,
 }
 
 fn default_polling_interval() -> u64 {

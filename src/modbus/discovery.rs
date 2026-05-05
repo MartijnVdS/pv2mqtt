@@ -56,10 +56,31 @@ impl ConnectionTask {
                 .map(|id| id.to_string())
                 .collect::<Vec<_>>()
                 .join(", "));
-            device_state.supported_model = SUPPORTED_MODELS
-                .iter()
-                .find(|&&id| available_models.contains(&id))
-                .copied();
+
+            let mut selected_model = None;
+
+            // Check if user has a preference
+            if let Some(preferred) = device_state.config.preferred_model {
+                if available_models.contains(&preferred) {
+                    info!("Using preferred SunSpec model {} for unit {}", preferred, unit_id);
+                    selected_model = Some(preferred);
+                } else {
+                    warn!(
+                        "Preferred SunSpec model {} is not supported by hardware for unit {}. Falling back to default priority list.",
+                        preferred, unit_id
+                    );
+                }
+            }
+
+            // Fallback to default priority list if no preference or preference was unavailable
+            if selected_model.is_none() {
+                selected_model = SUPPORTED_MODELS
+                    .iter()
+                    .find(|&&id| available_models.contains(&id))
+                    .copied();
+            }
+
+            device_state.supported_model = selected_model;
 
             if device_state.supported_model.is_none() {
                 let available = available_models

@@ -70,6 +70,11 @@ unit_id = 1
 # and excessive load on the MQTT broker.
 interval = 30
 
+# Optional: Override the default SunSpec model priority.
+# For example, if your inverter supports both 701 and 101, but the 101 data 
+# is more complete, you can force use of model 101.
+# preferred_model = 101
+
 # Enable bidirectional controls (SunSpec Model 123 support).
 # This allows sending commands to the inverter via MQTT.
 # See README.md for available control topics and security warnings.

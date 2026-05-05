@@ -2,8 +2,8 @@
 
 use super::traits::{SunSpecModel, ToStatusString};
 use super::types::{
-    InverterData, apply_sf_i16_opt, apply_sf_u16_sf_opt, apply_sf_u32_opt, apply_sf_u64_f64_opt,
-    SUNSPEC_UNIMPLEMENTED_U16,
+    InverterData, SUNSPEC_UNIMPLEMENTED_U16, apply_sf_i16_opt, apply_sf_u16_sf_opt,
+    apply_sf_u32_opt, apply_sf_u64_f64_opt,
 };
 use sunspec::models::model701::{
     Alrm as Alrm701, DerMode as DerMode701, Model701, ThrotSrc as ThrotSrc701,
@@ -91,11 +91,7 @@ fn map_alrm(alrm: Alrm701) -> Option<Vec<String>> {
         flags.push("MANUFACTURER_ALRM".to_string());
     }
 
-    if flags.is_empty() {
-        None
-    } else {
-        Some(flags)
-    }
+    if flags.is_empty() { None } else { Some(flags) }
 }
 
 fn map_der_mode(mode: DerMode701) -> Option<Vec<String>> {
@@ -109,11 +105,7 @@ fn map_der_mode(mode: DerMode701) -> Option<Vec<String>> {
     if mode.contains(DerMode701::PvClipped) {
         flags.push("PV_CLIPPED".to_string());
     }
-    if flags.is_empty() {
-        None
-    } else {
-        Some(flags)
-    }
+    if flags.is_empty() { None } else { Some(flags) }
 }
 
 fn map_throt_src(src: ThrotSrc701) -> Option<Vec<String>> {
@@ -163,11 +155,7 @@ fn map_throt_src(src: ThrotSrc701) -> Option<Vec<String>> {
     if src.contains(ThrotSrc701::Derated) {
         flags.push("DERATED".to_string());
     }
-    if flags.is_empty() {
-        None
-    } else {
-        Some(flags)
-    }
+    if flags.is_empty() { None } else { Some(flags) }
 }
 
 impl SunSpecModel for Model701 {

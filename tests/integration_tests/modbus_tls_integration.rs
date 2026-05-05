@@ -66,8 +66,9 @@ async fn test_tls_handshake_failure() {
             },
             devices: vec![DeviceConfig {
                 unit_id: 1,
-                interval: 10,
+                interval: 1,
                 enable_controls: false,
+                preferred_model: None,
             }],
             keep_alive_interval: None,
         },

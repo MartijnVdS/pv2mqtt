@@ -78,8 +78,9 @@ async fn test_reconnection_logic() {
             },
             devices: vec![DeviceConfig {
                 unit_id: 1,
-                interval: 10,
-                enable_controls: false,
+                interval: 1,
+                enable_controls: true,
+                preferred_model: None,
             }],
             keep_alive_interval: None,
         },
@@ -154,8 +155,9 @@ async fn test_successful_poll_logic() {
             devices: vec![DeviceConfig {
                 unit_id: 1,
                 interval: 1,
-                enable_controls: false,
-            }], // Short interval
+                enable_controls: true,
+                preferred_model: None,
+            }],
             keep_alive_interval: None,
         },
         mqtt_tx: tx,
@@ -298,8 +300,9 @@ async fn test_command_execution_logic() {
             },
             devices: vec![DeviceConfig {
                 unit_id: 1,
-                interval: 60,
-                enable_controls: true, // MUST be true
+                interval: 1,
+                enable_controls: true,
+                preferred_model: None,
             }],
             keep_alive_interval: None,
         },
@@ -421,8 +424,9 @@ async fn test_command_ignored_when_controls_disabled() {
             },
             devices: vec![DeviceConfig {
                 unit_id: 1,
-                interval: 60,
+                interval: 1,
                 enable_controls: false, // DISABLED
+                preferred_model: None,
             }],
             keep_alive_interval: None,
         },
@@ -509,7 +513,8 @@ async fn test_discovery_disabled_logic() {
             devices: vec![DeviceConfig {
                 unit_id: 1,
                 interval: 1,
-                enable_controls: false,
+                enable_controls: true,
+                preferred_model: None,
             }],
             keep_alive_interval: None,
         },
@@ -609,8 +614,9 @@ async fn test_model_704_command_execution_logic() {
             },
             devices: vec![DeviceConfig {
                 unit_id: 1,
-                interval: 60,
+                interval: 1,
                 enable_controls: true,
+                preferred_model: None,
             }],
             keep_alive_interval: None,
         },
