@@ -3,6 +3,7 @@
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
+pub const SUNSPEC_UNIMPLEMENTED_U64: u64 = 0xFFFFFFFFFFFFFFFF;
 pub const SUNSPEC_UNIMPLEMENTED_U32: u32 = 0xFFFFFFFF;
 pub const SUNSPEC_UNIMPLEMENTED_U16: u16 = 0xFFFF;
 pub const SUNSPEC_UNIMPLEMENTED_I16: i16 = -32768;
@@ -64,6 +65,22 @@ pub struct InverterData {
     pub tmp_trns: Option<f32>,
     #[serde(rename = "TmpOt")]
     pub tmp_ot: Option<f32>,
+    #[serde(rename = "TmpAmb", skip_serializing_if = "Option::is_none")]
+    pub tmp_amb: Option<f32>,
+    #[serde(rename = "TmpSw", skip_serializing_if = "Option::is_none")]
+    pub tmp_sw: Option<f32>,
+    #[serde(rename = "Alrm", skip_serializing_if = "Option::is_none")]
+    pub alrm: Option<Vec<String>>,
+    #[serde(rename = "MnAlrmInfo", skip_serializing_if = "Option::is_none")]
+    pub mn_alrm_info: Option<String>,
+    #[serde(rename = "DERMode", skip_serializing_if = "Option::is_none")]
+    pub der_mode: Option<Vec<String>>,
+    #[serde(rename = "ConnSt", skip_serializing_if = "Option::is_none")]
+    pub conn_st: Option<bool>,
+    #[serde(rename = "ThrotPct", skip_serializing_if = "Option::is_none")]
+    pub throt_pct: Option<f32>,
+    #[serde(rename = "ThrotSrc", skip_serializing_if = "Option::is_none")]
+    pub throt_src: Option<Vec<String>>,
     #[serde(rename = "St")]
     pub st: String,
     #[serde(rename = "Controls", skip_serializing_if = "Option::is_none")]
@@ -84,11 +101,39 @@ pub fn apply_sf_i16(val: i16, sf: i16) -> Option<f32> {
     Some(val as f32 * 10f32.powi(sf as i32))
 }
 
+pub fn apply_sf_u32(val: u32, sf: i16) -> Option<f32> {
+    if val == SUNSPEC_UNIMPLEMENTED_U32 {
+        return None;
+    }
+    Some(val as f32 * 10f32.powi(sf as i32))
+}
+
+pub fn apply_sf_u64_f64(val: u64, sf: i16) -> Option<f64> {
+    if val == SUNSPEC_UNIMPLEMENTED_U64 {
+        return None;
+    }
+    Some(val as f64 * 10f64.powi(sf as i32))
+}
+
 pub fn apply_sf_u32_f64(val: u32, sf: i16) -> Option<f64> {
     if val == SUNSPEC_UNIMPLEMENTED_U32 {
         return None;
     }
     Some(val as f64 * 10f64.powi(sf as i32))
+}
+
+pub fn apply_sf_u32_opt(val: Option<u32>, sf: Option<i16>) -> Option<f32> {
+    match (val, sf) {
+        (Some(v), Some(s)) => apply_sf_u32(v, s),
+        _ => None,
+    }
+}
+
+pub fn apply_sf_u64_f64_opt(val: Option<u64>, sf: Option<i16>) -> Option<f64> {
+    match (val, sf) {
+        (Some(v), Some(s)) => apply_sf_u64_f64(v, s),
+        _ => None,
+    }
 }
 
 pub fn apply_sf_u16_sf_opt(val: Option<u16>, sf: Option<i16>) -> Option<f32> {

@@ -33,6 +33,7 @@ sunspec = { version = "0.9", features = [
     "model112",
     "model113",
     "model123",
+    "model701",
     "model704",
 ] }
 serde = { version = "1.0", features = ["derive"] }

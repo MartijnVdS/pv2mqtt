@@ -121,7 +121,35 @@ impl HomeAssistantIntegration {
                 "Current Phase A",
             ));
 
-            if matches!(id, 102 | 103 | 112 | 113) {
+            if id == 701 {
+                sensors.push((
+                    "TmpAmb",
+                    Some("°C"),
+                    Some("temperature"),
+                    Some("measurement"),
+                    "Ambient Temperature",
+                ));
+                sensors.push((
+                    "TmpSw",
+                    Some("°C"),
+                    Some("temperature"),
+                    Some("measurement"),
+                    "IGBT/MOSFET Temperature",
+                ));
+                sensors.push(("Alrm", None, None, None, "Alarms"));
+                sensors.push(("MnAlrmInfo", None, None, None, "Manufacturer Alarm Info"));
+                sensors.push(("DERMode", None, None, None, "DER Operational Mode"));
+                sensors.push((
+                    "ThrotPct",
+                    Some("%"),
+                    None,
+                    Some("measurement"),
+                    "Throttling Percentage",
+                ));
+                sensors.push(("ThrotSrc", None, None, None, "Throttling Source"));
+            }
+
+            if matches!(id, 102 | 103 | 112 | 113 | 701) {
                 sensors.push((
                     "PhVphB",
                     Some("V"),
@@ -138,7 +166,7 @@ impl HomeAssistantIntegration {
                 ));
             }
 
-            if matches!(id, 103 | 113) {
+            if matches!(id, 103 | 113 | 701) {
                 sensors.push((
                     "PhVphC",
                     Some("V"),
@@ -187,6 +215,36 @@ impl HomeAssistantIntegration {
                 enabled_by_default,
                 options,
                 component: None,
+                command_topic: None,
+            };
+            let (topic, payload) = self.discovery_message(serial, &ctx);
+            messages.push(MqttMessage::Publish {
+                topic,
+                payload,
+                retain: true,
+            });
+        }
+
+        // Add binary sensors
+        let mut binary_sensors = Vec::new();
+        if model_id == Some(701) {
+            binary_sensors.push(("ConnSt", Some("connectivity"), "Grid Connection Status"));
+        }
+
+        for (name, device_class, label) in binary_sensors {
+            let ctx = DiscoveryContext {
+                manufacturer,
+                model,
+                version,
+                name,
+                value_path: None,
+                unit: None,
+                device_class,
+                state_class: None,
+                label,
+                enabled_by_default: true,
+                options: None,
+                component: Some("binary_sensor"),
                 command_topic: None,
             };
             let (topic, payload) = self.discovery_message(serial, &ctx);
@@ -467,5 +525,46 @@ mod tests {
 
         assert_eq!(cleanup_topics.len(), 3);
         assert!(cleanup_topics.iter().any(|t| t.contains("Conn")));
+    }
+
+    #[test]
+    fn test_generate_discovery_messages_m701() {
+        let ha = HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string());
+        let msgs = ha.generate_discovery_messages(
+            "SN123",
+            "Manufacturer",
+            "Model",
+            Some("1.0"),
+            Some(701),
+            crate::models::ActiveControlModel::None,
+        );
+
+        // Calculation:
+        // - Core sensors: 6
+        // - Phase A/B/C: 2 * 3 = 6
+        // - 701 Specific sensors: 7
+        // - Binary sensor: 1
+        // - Cleanup: 3
+        // Total: 6 + 6 + 7 + 1 + 3 = 23
+        assert_eq!(msgs.len(), 23);
+
+        let mut has_conn_st = false;
+        let mut has_alrm = false;
+        let mut has_ph_c = false;
+        for msg in &msgs {
+            let MqttMessage::Publish { topic, .. } = msg;
+            if topic.contains("ConnSt") {
+                has_conn_st = true;
+            }
+            if topic.contains("Alrm") {
+                has_alrm = true;
+            }
+            if topic.contains("PhVphC") {
+                has_ph_c = true;
+            }
+        }
+        assert!(has_conn_st);
+        assert!(has_alrm);
+        assert!(has_ph_c);
     }
 }
