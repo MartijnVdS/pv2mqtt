@@ -38,21 +38,24 @@ impl HomeAssistantIntegration {
         format!("{}/inverter/{}", self.topic_prefix, serial)
     }
 
+    pub fn status_topic(&self, serial: &str) -> String {
+        format!("{}/inverter/{}/status", self.topic_prefix, serial)
+    }
+
     pub fn generate_status_message(
         &self,
-        serial: &str,
+        topic: String,
         status: &str,
         error: Option<&Pv2MqttError>,
         last_success: Option<&DateTime<Utc>>,
     ) -> MqttMessage {
-        let topic = format!("{}/inverter/{}/status", self.topic_prefix, serial);
-        let payload = json!({
+        let payload = serde_json::to_vec(&json!({
             "timestamp": last_success.map(|dt| dt.to_rfc3339()),
             "status": status,
             "error": error.as_ref().map(|e| e.to_string()),
             "error_category": error.as_ref().map(|e| e.category()),
-        })
-        .to_string();
+        }))
+        .unwrap_or_default();
 
         MqttMessage::Publish {
             topic,
@@ -331,7 +334,7 @@ impl HomeAssistantIntegration {
                 );
                 messages.push(MqttMessage::Publish {
                     topic,
-                    payload: "".to_string(),
+                    payload: Vec::new(),
                     retain: true,
                 });
             }
@@ -340,7 +343,7 @@ impl HomeAssistantIntegration {
         messages
     }
 
-    pub fn discovery_message(&self, serial: &str, ctx: &DiscoveryContext) -> (String, String) {
+    pub fn discovery_message(&self, serial: &str, ctx: &DiscoveryContext) -> (String, Vec<u8>) {
         let component = ctx.component.unwrap_or("sensor");
         let topic = format!(
             "{}/{}/{}/{}/config",
@@ -390,7 +393,7 @@ impl HomeAssistantIntegration {
             payload["options"] = json!(options);
         }
 
-        (topic, payload.to_string())
+        (topic, serde_json::to_vec(&payload).unwrap_or_default())
     }
 }
 

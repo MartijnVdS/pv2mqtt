@@ -60,8 +60,11 @@ impl ConnectionTask {
                     }
 
                     device_state.last_success_timestamp = Some(Utc::now());
-                    let payload = serde_json::to_string(&data)?;
-                    let topic = self.ha.inverter_topic(serial);
+                    let payload = serde_json::to_vec(&data)?;
+                    let topic = device_state
+                        .inverter_topic
+                        .clone()
+                        .unwrap_or_else(|| self.ha.inverter_topic(serial));
                     self.mqtt_tx
                         .send(MqttMessage::Publish {
                             topic,
@@ -70,8 +73,12 @@ impl ConnectionTask {
                         })
                         .await?;
 
+                    let status_topic = device_state
+                        .status_topic
+                        .clone()
+                        .unwrap_or_else(|| self.ha.status_topic(serial));
                     let status_msg = self.ha.generate_status_message(
-                        serial,
+                        status_topic,
                         "OK",
                         None,
                         device_state.last_success_timestamp.as_ref(),
@@ -85,8 +92,12 @@ impl ConnectionTask {
                     };
                     error!("Failed to poll: {}", pv_err);
                     // Update status with error
+                    let status_topic = device_state
+                        .status_topic
+                        .clone()
+                        .unwrap_or_else(|| self.ha.status_topic(serial));
                     let status_msg = self.ha.generate_status_message(
-                        serial,
+                        status_topic,
                         "ERROR",
                         Some(&pv_err),
                         device_state.last_success_timestamp.as_ref(),
@@ -98,8 +109,12 @@ impl ConnectionTask {
                     let pv_err =
                         Pv2MqttError::Internal(format!("Timeout polling device {}", serial));
                     error!("{}", pv_err);
+                    let status_topic = device_state
+                        .status_topic
+                        .clone()
+                        .unwrap_or_else(|| self.ha.status_topic(serial));
                     let status_msg = self.ha.generate_status_message(
-                        serial,
+                        status_topic,
                         "ERROR",
                         Some(&pv_err),
                         device_state.last_success_timestamp.as_ref(),

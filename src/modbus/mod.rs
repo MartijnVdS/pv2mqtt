@@ -101,6 +101,8 @@ impl ConnectionTask {
                 supported_model: None,
                 active_control: crate::models::ActiveControlModel::None,
                 device: None,
+                inverter_topic: None,
+                status_topic: None,
             })
             .collect();
 

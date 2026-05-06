@@ -36,19 +36,21 @@ fn test_topics() {
     let task = test_task();
     assert_eq!(task.ha.inverter_topic("SN123"), "solar/inverter/SN123");
 
-    let msg = task.ha.generate_status_message("SN123", "OK", None, None);
+    let status_topic = task.ha.status_topic("SN123");
+    let msg = task.ha.generate_status_message(status_topic, "OK", None, None);
     let (topic, payload) = match msg {
-        MqttMessage::Publish { topic, payload, .. } => (topic, payload),
+        MqttMessage::Publish { topic, payload, .. } => (topic, String::from_utf8(payload).unwrap()),
     };
     assert_eq!(topic, "solar/inverter/SN123/status");
     assert!(payload.contains("\"timestamp\":null"));
 
     let now = Utc::now();
+    let status_topic = task.ha.status_topic("SN123");
     let msg_with_ts = task
         .ha
-        .generate_status_message("SN123", "OK", None, Some(&now));
+        .generate_status_message(status_topic, "OK", None, Some(&now));
     let payload = match msg_with_ts {
-        MqttMessage::Publish { payload, .. } => payload,
+        MqttMessage::Publish { payload, .. } => String::from_utf8(payload).unwrap(),
     };
     assert!(payload.contains(&now.to_rfc3339()));
 }
@@ -72,7 +74,8 @@ fn test_discovery_message() {
         component: None,
         command_topic: None,
     };
-    let (topic, payload) = task.ha.discovery_message("SN123", &ctx);
+    let (topic, payload_bytes) = task.ha.discovery_message("SN123", &ctx);
+    let payload = String::from_utf8(payload_bytes).unwrap();
 
     assert_eq!(topic, "homeassistant/sensor/SN123/W/config");
     assert!(payload.contains("\"state_topic\":\"solar/inverter/SN123\""));
@@ -105,7 +108,8 @@ fn test_discovery_message_enum() {
         component: None,
         command_topic: None,
     };
-    let (topic, payload) = task.ha.discovery_message("SN123", &ctx);
+    let (topic, payload_bytes) = task.ha.discovery_message("SN123", &ctx);
+    let payload = String::from_utf8(payload_bytes).unwrap();
 
     assert_eq!(topic, "homeassistant/sensor/SN123/St/config");
     assert!(payload.contains("\"device_class\":\"enum\""));

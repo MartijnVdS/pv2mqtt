@@ -216,9 +216,10 @@ async fn test_successful_poll_logic() {
 
     let MqttMessage::Publish { topic, payload, .. } = w_discovery;
     assert_eq!(*topic, "homeassistant/sensor/SN1234/W/config");
-    assert!(payload.contains("\"manufacturer\":\"Brand\""));
-    assert!(payload.contains("\"model\":\"Model\""));
-    assert!(payload.contains("\"unique_id\":\"solar_SN1234_W\""));
+    let payload_str = String::from_utf8_lossy(payload);
+    assert!(payload_str.contains("\"manufacturer\":\"Brand\""));
+    assert!(payload_str.contains("\"model\":\"Model\""));
+    assert!(payload_str.contains("\"unique_id\":\"solar_SN1234_W\""));
 
     // Check for data messages
     let data_msgs: Vec<_> = messages
@@ -231,7 +232,7 @@ async fn test_successful_poll_logic() {
     assert!(!data_msgs.is_empty(), "Should have received poll data");
 
     let MqttMessage::Publish { payload, .. } = &data_msgs[0];
-    let json: serde_json::Value = serde_json::from_str(payload).unwrap();
+    let json: serde_json::Value = serde_json::from_slice(payload).unwrap();
     assert_eq!(json["W"], 1000.0);
     assert_eq!(json["St"], "OFF");
 
@@ -249,7 +250,7 @@ async fn test_successful_poll_logic() {
     );
 
     let MqttMessage::Publish { payload, .. } = &status_msgs[0];
-    let json: serde_json::Value = serde_json::from_str(payload).unwrap();
+    let json: serde_json::Value = serde_json::from_slice(payload).unwrap();
     assert_eq!(json["status"], "OK");
 
     token_clone.cancel();

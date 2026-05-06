@@ -142,7 +142,9 @@ impl ConnectionTask {
                         return Ok(());
                     }
 
-                    // Only log and publish discovery if it's new or changed
+                    device_state.inverter_topic = Some(self.ha.inverter_topic(&serial));
+                    device_state.status_topic = Some(self.ha.status_topic(&serial));
+
                     if device_state.serial.as_ref() != Some(&serial) {
                         info!(
                             "Discovered device: {} {} (Serial: {})",

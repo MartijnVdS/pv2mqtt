@@ -18,6 +18,8 @@ pub struct DeviceState {
     pub supported_model: Option<u16>,
     pub active_control: ActiveControlModel,
     pub device: Option<AsyncDevice<Arc<Mutex<ModbusContext>>>>,
+    pub inverter_topic: Option<String>,
+    pub status_topic: Option<String>,
 }
 
 impl DeviceState {

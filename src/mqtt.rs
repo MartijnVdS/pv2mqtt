@@ -22,7 +22,7 @@ const MQTT_SHUTDOWN_TIMEOUT_MILLIS: u64 = 500;
 pub enum MqttMessage {
     Publish {
         topic: String,
-        payload: String,
+        payload: Vec<u8>,
         retain: bool,
     },
 }
@@ -115,30 +115,30 @@ fn handle_incoming_publish(
         }
     };
 
-    let payload_lc = payload.to_lowercase();
-
     // Expected topic: {prefix}/inverter/{serial}/set/{register}
-    let parts: Vec<&str> = topic.split('/').collect();
-    if parts.len() < 5 || parts[0] != topic_prefix || parts[1] != "inverter" || parts[3] != "set" {
+    let mut parts = topic.split('/');
+    let (Some(p0), Some(p1), Some(serial_part), Some(p3), Some(register)) = (
+        parts.next(),
+        parts.next(),
+        parts.next(),
+        parts.next(),
+        parts.next(),
+    ) else {
         warn!("Received message for an unknown MQTT topic");
+        return;
+    };
+
+    if p0 != topic_prefix || p1 != "inverter" || p3 != "set" || parts.next().is_some() {
+        warn!("Received message for an unknown or malformed MQTT topic");
         return;
     }
 
-    let serial = parts[2].to_string();
-    let register = parts[4];
+    let serial = serial_part.to_string();
 
     let action = match register {
-        "Conn" => match payload_lc.as_str() {
-            "true" | "1" | "on" => Some(ControlAction::Conn(true)),
-            "false" | "0" | "off" => Some(ControlAction::Conn(false)),
-            _ => None,
-        },
+        "Conn" => parse_mqtt_bool(payload).map(ControlAction::Conn),
         "WMaxLimPct" => payload.parse::<f32>().ok().map(ControlAction::WMaxLimPct),
-        "WMaxLim_Ena" => match payload_lc.as_str() {
-            "true" | "1" | "on" => Some(ControlAction::WMaxLimEna(true)),
-            "false" | "0" | "off" => Some(ControlAction::WMaxLimEna(false)),
-            _ => None,
-        },
+        "WMaxLim_Ena" => parse_mqtt_bool(payload).map(ControlAction::WMaxLimEna),
         _ => None,
     };
 
@@ -150,6 +150,19 @@ fn handle_incoming_publish(
             "Received unknown or invalid command for {}: {}",
             register, payload
         );
+    }
+}
+
+fn parse_mqtt_bool(payload: &str) -> Option<bool> {
+    if payload.eq_ignore_ascii_case("true") || payload == "1" || payload.eq_ignore_ascii_case("on") {
+        Some(true)
+    } else if payload.eq_ignore_ascii_case("false")
+        || payload == "0"
+        || payload.eq_ignore_ascii_case("off")
+    {
+        Some(false)
+    } else {
+        None
     }
 }
 
@@ -248,7 +261,11 @@ impl MqttTask {
                     payload,
                     retain,
                 } => {
-                    debug!("Publishing to {}: {}", topic, payload);
+                    debug!(
+                        "Publishing to {}: {}",
+                        topic,
+                        String::from_utf8_lossy(&payload)
+                    );
                     if let Err(e) = client
                         .publish(topic, QoS::AtLeastOnce, retain, payload)
                         .await
