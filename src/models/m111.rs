@@ -4,22 +4,17 @@ use super::traits::{SunSpecModel, ToStatusString};
 use super::types::InverterData;
 use sunspec::models::model111::Model111;
 
-impl ToStatusString for sunspec::models::model111::St {
-    fn to_status_string(&self) -> String {
-        match self {
-            Self::GgOff => "OFF",
-            Self::GgSleeping => "SLEEPING",
-            Self::GgStarting => "STARTING",
-            Self::GgMppt => "MPPT",
-            Self::GgThrottled => "THROTTLED",
-            Self::GgShuttingDown => "SHUTTING_DOWN",
-            Self::GgFault => "FAULT",
-            Self::GgStandby => "STANDBY",
-            _ => "UNKNOWN",
-        }
-        .to_string()
-    }
-}
+impl_to_status_string_for_st!(
+    sunspec::models::model111::St,
+    GgOff,
+    GgSleeping,
+    GgStarting,
+    GgMppt,
+    GgThrottled,
+    GgShuttingDown,
+    GgFault,
+    GgStandby
+);
 
 impl SunSpecModel for Model111 {
     fn into_inverter_data(self, data: &mut InverterData) {

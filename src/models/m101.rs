@@ -6,22 +6,17 @@ use super::types::{
 };
 use sunspec::models::model101::Model101;
 
-impl ToStatusString for sunspec::models::model101::St {
-    fn to_status_string(&self) -> String {
-        match self {
-            Self::Off => "OFF",
-            Self::Sleeping => "SLEEPING",
-            Self::Starting => "STARTING",
-            Self::Mppt => "MPPT",
-            Self::Throttled => "THROTTLED",
-            Self::ShuttingDown => "SHUTTING_DOWN",
-            Self::Fault => "FAULT",
-            Self::Standby => "STANDBY",
-            _ => "UNKNOWN",
-        }
-        .to_string()
-    }
-}
+impl_to_status_string_for_st!(
+    sunspec::models::model101::St,
+    Off,
+    Sleeping,
+    Starting,
+    Mppt,
+    Throttled,
+    ShuttingDown,
+    Fault,
+    Standby
+);
 
 impl SunSpecModel for Model101 {
     fn into_inverter_data(self, data: &mut InverterData) {
