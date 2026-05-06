@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-#[macro_use]
-pub mod traits;
-pub mod types;
-
 pub mod m101;
 pub mod m102;
 pub mod m103;
@@ -13,6 +9,8 @@ pub mod m113;
 pub mod m123;
 pub mod m701;
 pub mod m704;
+pub mod traits;
+pub mod types;
 
 pub use traits::*;
 pub use types::*;

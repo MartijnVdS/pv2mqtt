@@ -2,6 +2,7 @@
 
 use super::traits::{SunSpecModel, ToStatusString};
 use super::types::InverterData;
+use crate::impl_to_status_string_for_st;
 use sunspec::models::model111::Model111;
 
 impl_to_status_string_for_st!(

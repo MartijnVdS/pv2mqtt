@@ -4,6 +4,7 @@ use super::traits::{SunSpecModel, ToStatusString};
 use super::types::{
     InverterData, apply_sf, apply_sf_i16, apply_sf_i16_opt, apply_sf_opt, apply_sf_u32_f64,
 };
+use crate::impl_to_status_string_for_st;
 use sunspec::models::model102::Model102;
 
 impl_to_status_string_for_st!(

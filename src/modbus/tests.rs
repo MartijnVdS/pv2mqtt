@@ -37,7 +37,9 @@ fn test_topics() {
     assert_eq!(task.ha.inverter_topic("SN123"), "solar/inverter/SN123");
 
     let status_topic = task.ha.status_topic("SN123");
-    let msg = task.ha.generate_status_message(status_topic, "OK", None, None);
+    let msg = task
+        .ha
+        .generate_status_message(status_topic, "OK", None, None);
     let (topic, payload) = match msg {
         MqttMessage::Publish { topic, payload, .. } => (topic, String::from_utf8(payload).unwrap()),
     };

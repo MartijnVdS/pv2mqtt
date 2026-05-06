@@ -154,7 +154,8 @@ fn handle_incoming_publish(
 }
 
 fn parse_mqtt_bool(payload: &str) -> Option<bool> {
-    if payload.eq_ignore_ascii_case("true") || payload == "1" || payload.eq_ignore_ascii_case("on") {
+    if payload.eq_ignore_ascii_case("true") || payload == "1" || payload.eq_ignore_ascii_case("on")
+    {
         Some(true)
     } else if payload.eq_ignore_ascii_case("false")
         || payload == "0"
