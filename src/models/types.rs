@@ -31,6 +31,18 @@ pub struct ControlData {
 }
 
 #[derive(Debug, Serialize, Default, Clone)]
+pub struct NameplateData {
+    #[serde(rename = "WMax")]
+    pub w_max: Option<f32>,
+    #[serde(rename = "VAMax")]
+    pub va_max: Option<f32>,
+    #[serde(rename = "VArMaxInj")]
+    pub var_max_inj: Option<f32>,
+    #[serde(rename = "VArMaxAbs")]
+    pub var_max_abs: Option<f32>,
+}
+
+#[derive(Debug, Serialize, Default, Clone)]
 pub struct InverterData {
     pub timestamp: DateTime<Utc>,
     #[serde(rename = "AphA")]

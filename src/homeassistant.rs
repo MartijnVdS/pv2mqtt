@@ -24,6 +24,8 @@ pub struct DiscoveryContext<'a> {
     pub options: Option<Vec<&'static str>>,
     pub component: Option<&'static str>,
     pub command_topic: Option<String>,
+    pub entity_category: Option<&'static str>,
+    pub state_topic: Option<String>,
 }
 
 impl HomeAssistantIntegration {
@@ -219,6 +221,8 @@ impl HomeAssistantIntegration {
                 options,
                 component: None,
                 command_topic: None,
+                entity_category: None,
+                state_topic: None,
             };
             let (topic, payload) = self.discovery_message(serial, &ctx);
             messages.push(MqttMessage::Publish {
@@ -249,6 +253,8 @@ impl HomeAssistantIntegration {
                 options: None,
                 component: Some("binary_sensor"),
                 command_topic: None,
+                entity_category: None,
+                state_topic: None,
             };
             let (topic, payload) = self.discovery_message(serial, &ctx);
             messages.push(MqttMessage::Publish {
@@ -313,6 +319,8 @@ impl HomeAssistantIntegration {
                     options: None,
                     component: Some(component),
                     command_topic: Some(cmd_topic),
+                    entity_category: None,
+                    state_topic: None,
                 };
                 let (topic, payload) = self.discovery_message(serial, &ctx);
                 messages.push(MqttMessage::Publish {
@@ -343,15 +351,89 @@ impl HomeAssistantIntegration {
         messages
     }
 
+    pub fn generate_nameplate_discovery_messages(
+        &self,
+        serial: &str,
+        manufacturer: &str,
+        model: &str,
+        version: Option<&str>,
+    ) -> Vec<MqttMessage> {
+        let mut messages = Vec::new();
+        let nameplate_topic = format!("{}/inverter/{}/nameplate", self.topic_prefix, serial);
+
+        let sensors = vec![
+            (
+                "WMax",
+                Some("W"),
+                Some("power"),
+                Some("measurement"),
+                "Max Active Power",
+            ),
+            (
+                "VAMax",
+                Some("VA"),
+                Some("apparent_power"),
+                Some("measurement"),
+                "Max Apparent Power",
+            ),
+            (
+                "VArMaxInj",
+                Some("var"),
+                Some("reactive_power"),
+                Some("measurement"),
+                "Max Reactive Power Injected",
+            ),
+            (
+                "VArMaxAbs",
+                Some("var"),
+                Some("reactive_power"),
+                Some("measurement"),
+                "Max Reactive Power Absorbed",
+            ),
+        ];
+
+        for (name, unit, device_class, state_class, label) in sensors {
+            let ctx = DiscoveryContext {
+                manufacturer,
+                model,
+                version,
+                name,
+                value_path: None,
+                unit,
+                device_class,
+                state_class,
+                label,
+                enabled_by_default: true,
+                options: None,
+                component: None,
+                command_topic: None,
+                entity_category: Some("diagnostic"),
+                state_topic: Some(nameplate_topic.clone()),
+            };
+            let (topic, payload) = self.discovery_message(serial, &ctx);
+            messages.push(MqttMessage::Publish {
+                topic,
+                payload,
+                retain: true,
+            });
+        }
+
+        messages
+    }
+
     pub fn discovery_message(&self, serial: &str, ctx: &DiscoveryContext) -> (String, Vec<u8>) {
         let component = ctx.component.unwrap_or("sensor");
         let topic = format!(
             "{}/{}/{}/{}/config",
             self.ha_prefix, component, serial, ctx.name
         );
+        let state_topic = ctx
+            .state_topic
+            .clone()
+            .unwrap_or_else(|| self.inverter_topic(serial));
         let mut payload = json!({
             "name": ctx.label,
-            "state_topic": self.inverter_topic(serial),
+            "state_topic": state_topic,
             "value_template": format!(
                 "{{{{ value_json.{} }}}}",
                 ctx.value_path.as_deref().unwrap_or(ctx.name)
@@ -391,6 +473,10 @@ impl HomeAssistantIntegration {
         }
         if let Some(options) = &ctx.options {
             payload["options"] = json!(options);
+        }
+
+        if let Some(ec) = ctx.entity_category {
+            payload["entity_category"] = json!(ec);
         }
 
         (topic, serde_json::to_vec(&payload).unwrap_or_default())
@@ -569,5 +655,40 @@ mod tests {
         assert!(has_conn_st);
         assert!(has_alrm);
         assert!(has_ph_c);
+    }
+
+    #[test]
+    fn test_generate_nameplate_discovery_messages() {
+        let ha = HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string());
+        let msgs =
+            ha.generate_nameplate_discovery_messages("SN123", "Brand", "ModelX", Some("v1.0"));
+
+        // Should have 4 diagnostic sensors: WMax, VAMax, VArMaxInj, VArMaxAbs
+        assert_eq!(msgs.len(), 4);
+
+        let mut found_w_max = false;
+        for msg in &msgs {
+            let MqttMessage::Publish { topic, payload, .. } = msg;
+
+            // Topic format: homeassistant/sensor/SN123/{name}/config
+            assert!(topic.starts_with("homeassistant/sensor/SN123/"));
+            assert!(topic.ends_with("/config"));
+
+            let body: serde_json::Value = serde_json::from_slice(payload).unwrap();
+
+            // Verify state topic
+            assert_eq!(body["state_topic"], "solar/inverter/SN123/nameplate");
+
+            // Verify category
+            assert_eq!(body["entity_category"], "diagnostic");
+
+            if topic.contains("WMax") {
+                found_w_max = true;
+                assert_eq!(body["name"], "Max Active Power");
+                assert_eq!(body["unit_of_measurement"], "W");
+                assert_eq!(body["device_class"], "power");
+            }
+        }
+        assert!(found_w_max);
     }
 }

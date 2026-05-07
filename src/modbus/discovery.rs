@@ -172,6 +172,85 @@ impl ConnectionTask {
                     } else {
                         info!("Refreshed connection to device (Serial: {})", serial);
                     }
+
+                    // Read and Publish Nameplate Data
+                    let mut nameplate:Option<crate::models::NameplateData> = None;
+
+                    if available_models.contains(&702) {
+                        match tokio::time::timeout(
+                            Duration::from_secs(POLL_TIMEOUT_SECS),
+                            device.read_model::<sunspec::models::model702::Model702>(),
+                        )
+                        .await
+                        {
+                            Ok(Ok(m702)) => {
+                                debug!("Read Model 702 nameplate for unit {}", unit_id);
+                                nameplate = Some(crate::models::NameplateData {
+                                    w_max: m702.w_max_rtg.map(|v| v as f32),
+                                    va_max: m702.va_max_rtg.map(|v| v as f32),
+                                    var_max_inj: m702.var_max_inj_rtg.map(|v| v as f32),
+                                    var_max_abs: m702.var_max_abs_rtg.map(|v| v as f32),
+                                })
+                            }
+                            Ok(Err(e)) => warn!("Failed to read Model 702 for unit {}: {}", unit_id, e),
+                            Err(_) => warn!("Timeout reading Model 702 for unit {}", unit_id),
+                        }
+                    } else if available_models.contains(&120) {
+                        match tokio::time::timeout(
+                            Duration::from_secs(POLL_TIMEOUT_SECS),
+                            device.read_model::<sunspec::models::model120::Model120>(),
+                        )
+                        .await
+                        {
+                            Ok(Ok(m120)) => {
+                                debug!("Read Model 120 nameplate for unit {}", unit_id);
+                                use crate::models::apply_sf;
+                                nameplate = Some(crate::models::NameplateData {
+                                    w_max:apply_sf(m120.w_rtg, m120.w_rtg_sf),
+                                    va_max: apply_sf(m120.va_rtg, m120.va_rtg_sf),
+                                    var_max_inj: apply_sf(m120.v_ar_rtg_q1 as u16, m120.v_ar_rtg_sf), // Simplified mapping
+                                    var_max_abs: apply_sf(m120.v_ar_rtg_q4 as u16, m120.v_ar_rtg_sf),
+                                });
+                            }
+                            Ok(Err(e)) => warn!("Failed to read Model 120 for unit {}: {}", unit_id, e),
+                            Err(_) => warn!("Timeout reading Model 120 for unit {}", unit_id),
+                        }
+                    }
+
+                    if let Some(nameplate) = nameplate {
+                        let prefix = device_state
+                            .inverter_topic
+                            .as_ref()
+                            .and_then(|t| t.split('/').next())
+                            .unwrap_or("solar");
+                        let nameplate_topic = format!("{}/inverter/{}/nameplate", prefix, serial);
+
+                        match serde_json::to_vec(&nameplate) {
+                            Ok(payload) => {
+                                let _ = self
+                                    .mqtt_tx
+                                    .send(crate::mqtt::MqttMessage::Publish {
+                                        topic: nameplate_topic,
+                                        payload,
+                                        retain: true,
+                                    })
+                                    .await;
+                            }
+                            Err(e) => warn!("Failed to serialize nameplate data: {}", e),
+                        }
+
+                        if self.ha_enabled {
+                            let ha_msgs = self.ha.generate_nameplate_discovery_messages(
+                                &serial,
+                                &manufacturer,
+                                &model,
+                                version_opt.as_deref(),
+                            );
+                            for msg in ha_msgs {
+                                let _ = self.mqtt_tx.send(msg).await;
+                            }
+                        }
+                    }
                 }
                 Ok(Err(e)) => {
                     warn!("Failed to read Model 1 for unit {}: {}", unit_id, e);

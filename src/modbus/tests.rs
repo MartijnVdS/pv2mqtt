@@ -75,6 +75,8 @@ fn test_discovery_message() {
         options: None,
         component: None,
         command_topic: None,
+        entity_category: None,
+        state_topic: None,
     };
     let (topic, payload_bytes) = task.ha.discovery_message("SN123", &ctx);
     let payload = String::from_utf8(payload_bytes).unwrap();
@@ -109,6 +111,8 @@ fn test_discovery_message_enum() {
         options: Some(vec!["OFF", "ON"]),
         component: None,
         command_topic: None,
+        entity_category: None,
+        state_topic: None,
     };
     let (topic, payload_bytes) = task.ha.discovery_message("SN123", &ctx);
     let payload = String::from_utf8(payload_bytes).unwrap();

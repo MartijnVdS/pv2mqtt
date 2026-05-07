@@ -51,6 +51,22 @@ fn setup_mock_sunspec_registers(r: &mut [u16]) -> usize {
     40122
 }
 
+fn setup_mock_sunspec_registers_with_nameplate(r: &mut [u16]) -> usize {
+    let next_addr = setup_mock_sunspec_registers(r);
+
+    // Model 702 (DER Capacity) at next_addr
+    r[next_addr] = 702; // Model ID
+    r[next_addr + 1] = 50; // Length
+    let m702_base = next_addr + 2;
+
+    r[m702_base] = 5000; // W_MAX_RTG
+    r[m702_base + 5] = 5500; // VA_MAX_RTG
+    r[m702_base + 6] = 2500; // VAR_MAX_INJ_RTG
+    r[m702_base + 7] = 0xFFFF; // VAR_MAX_ABS_RTG (Unimplemented)
+
+    next_addr + 52
+}
+
 #[tokio::test]
 #[traced_test]
 async fn test_reconnection_logic() {
@@ -668,4 +684,96 @@ async fn test_model_704_command_execution_logic() {
     token_clone.cancel();
     tokio::time::advance(Duration::from_millis(100)).await;
     let _ = task_handle.await.unwrap();
+}
+
+#[tokio::test]
+#[traced_test]
+async fn test_discovery_reads_nameplate_and_publishes() {
+    tokio::time::pause();
+
+    let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+    let handle_mock = modbus_server::start_mock_server(addr).await;
+    let addr_str = handle_mock.addr.to_string();
+    let regs = handle_mock.registers;
+
+    {
+        let mut r = regs.lock().unwrap();
+        let next_addr = setup_mock_sunspec_registers_with_nameplate(&mut r);
+        r[next_addr] = 0xFFFF; // End marker
+        r[next_addr + 1] = 0;
+    }
+
+    let (tx, mut rx) = mpsc::channel(100);
+    let token = CancellationToken::new();
+    let root_cert_store = Arc::new(rustls::RootCertStore::empty());
+    let (_, cmd_rx) = tokio::sync::broadcast::channel(1);
+
+    let task = ConnectionTask {
+        config: ConnectionConfig {
+            name: "test".to_string(),
+            modbus: ModbusConfig::Tcp {
+                address: addr_str,
+                tls: false,
+                ca_path: None,
+                cert_path: None,
+                key_path: None,
+            },
+            devices: vec![DeviceConfig {
+                unit_id: 1,
+                interval: 1,
+                enable_controls: true,
+                preferred_model: None,
+            }],
+            keep_alive_interval: None,
+        },
+        mqtt_tx: tx,
+        ha: HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string()),
+        ha_enabled: true,
+        token: token.clone(),
+        root_cert_store,
+        cmd_rx,
+    };
+
+    let token_clone = token.clone();
+    let _task_handle = tokio::spawn(async move { task.run_internal().await });
+
+    // Advance time to trigger discovery and polling
+    tokio::time::advance(Duration::from_secs(1)).await;
+
+    let mut found_nameplate_payload = false;
+    let mut discovery_msg_count = 0;
+
+    for _ in 0..1000 {
+        tokio::time::advance(Duration::from_millis(10)).await;
+        while let Ok(msg) = rx.try_recv() {
+            let MqttMessage::Publish { topic, payload, .. } = msg;
+            if topic.ends_with("/nameplate") {
+                found_nameplate_payload = true;
+                let val: serde_json::Value = serde_json::from_slice(&payload).unwrap();
+                assert_eq!(val["WMax"], 5000.0);
+                assert_eq!(val["VAMax"], 5500.0);
+                assert_eq!(val["VArMaxInj"], 2500.0);
+                assert!(val["VArMaxAbs"].is_null()); // Verified Option logic
+            } else if topic.starts_with("homeassistant/")
+                && topic.contains("/config")
+                && (topic.contains("/WMax/")
+                    || topic.contains("/VAMax/")
+                    || topic.contains("/VArMaxInj/")
+                    || topic.contains("/VArMaxAbs/"))
+            {
+                discovery_msg_count += 1;
+            }
+        }
+        if found_nameplate_payload && discovery_msg_count == 4 {
+            break;
+        }
+    }
+
+    assert!(found_nameplate_payload, "Nameplate payload not found");
+    assert_eq!(
+        discovery_msg_count, 4,
+        "Expected 4 HA discovery messages for nameplate"
+    );
+
+    token_clone.cancel();
 }
