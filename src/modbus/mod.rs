@@ -41,9 +41,9 @@ pub const M123_WMAX_LIM_PCT_SF_OFFSET: u16 = 21;
 
 // SunSpec Model 704 (DER AC Controls) Data-Relative Offsets (Spec Offset - 2)
 // These match the 'offset' attribute in the SunSpec specification
-pub const M704_WMAX_LIM_ENA_OFFSET: u16 = 14;
-pub const M704_WMAX_LIM_PCT_OFFSET: u16 = 15;
-pub const M704_WMAX_LIM_PCT_SF_OFFSET: u16 = 54;
+pub const M704_WMAX_LIM_ENA_OFFSET: u16 = 12;
+pub const M704_WMAX_LIM_PCT_OFFSET: u16 = 13;
+pub const M704_WMAX_LIM_PCT_SF_OFFSET: u16 = 52;
 
 pub struct ConnectionTask {
     pub config: ConnectionConfig,

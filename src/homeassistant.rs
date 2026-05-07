@@ -28,6 +28,14 @@ pub struct DiscoveryContext<'a> {
     pub state_topic: Option<String>,
 }
 
+type SensorDefinitionTuple = (
+    &'static str,
+    Option<&'static str>,
+    Option<&'static str>,
+    Option<&'static str>,
+    &'static str,
+);
+
 impl HomeAssistantIntegration {
     pub fn new(topic_prefix: String, ha_prefix: String) -> Self {
         Self {
@@ -165,16 +173,7 @@ impl HomeAssistantIntegration {
         messages
     }
 
-    fn collect_sensor_definitions(
-        &self,
-        model_id: Option<u16>,
-    ) -> Vec<(
-        &'static str,
-        Option<&'static str>,
-        Option<&'static str>,
-        Option<&'static str>,
-        &'static str,
-    )> {
+    fn collect_sensor_definitions(&self, model_id: Option<u16>) -> Vec<SensorDefinitionTuple> {
         let mut sensors = vec![
             ("W", Some("W"), Some("power"), Some("measurement"), "Power"),
             (
