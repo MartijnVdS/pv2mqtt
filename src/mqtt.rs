@@ -188,46 +188,7 @@ impl MqttTask {
     }
 
     async fn run_internal(mut self) -> Result<()> {
-        let mut url = url::Url::parse(&self.config.url).map_err(|e| {
-            Pv2MqttError::MqttConnection(format!("Failed to parse MQTT URL: {}", e))
-        })?;
-        url.query_pairs_mut()
-            .append_pair("client_id", &self.config.client_id);
-
-        let scheme = url.scheme().to_owned();
-        let is_tls = scheme == "mqtts" || scheme == "ssl";
-
-        // MqttOptions::parse_url in rumqttc-next handles mqtts:// by requiring
-        // a default TLS configuration. Since we want to provide our own
-        // via set_transport, we change the scheme to mqtt:// for parsing.
-        if is_tls {
-            url.set_scheme("mqtt").map_err(|_| {
-                Pv2MqttError::MqttConnection("failed to set scheme to mqtt".to_string())
-            })?;
-        }
-
-        let mut mqttoptions = MqttOptions::parse_url(url.as_str()).map_err(|e| {
-            Pv2MqttError::MqttConnection(format!("Failed to parse URL for rumqttc: {}", e))
-        })?;
-        mqttoptions.set_keep_alive(MQTT_KEEPALIVE_INTERVAL_SECS);
-
-        if is_tls {
-            if self.config.cert_path.is_some() || self.config.key_path.is_some() {
-                info!("Using mTLS for MQTT connection");
-            }
-
-            let client_config = crate::tls::create_client_config(
-                Arc::clone(&self.root_cert_store),
-                self.config.ca_path.as_deref(),
-                self.config.cert_path.as_deref(),
-                self.config.key_path.as_deref(),
-            )?;
-
-            mqttoptions.set_transport(Transport::tls_with_config(TlsConfiguration::Rustls(
-                Arc::new(client_config),
-            )));
-        }
-
+        let mqttoptions = self.configure_mqtt_options()?;
         let (client, eventloop) = AsyncClient::builder(mqttoptions).capacity(20).build();
 
         info!(
@@ -294,6 +255,50 @@ impl MqttTask {
         .await;
 
         Ok(())
+    }
+
+    fn configure_mqtt_options(&self) -> Result<MqttOptions> {
+        let mut url = url::Url::parse(&self.config.url).map_err(|e| {
+            Pv2MqttError::MqttConnection(format!("Failed to parse MQTT URL: {}", e))
+        })?;
+        url.query_pairs_mut()
+            .append_pair("client_id", &self.config.client_id);
+
+        let scheme = url.scheme().to_owned();
+        let is_tls = scheme == "mqtts" || scheme == "ssl";
+
+        // MqttOptions::parse_url in rumqttc-next handles mqtts:// by requiring
+        // a default TLS configuration. Since we want to provide our own
+        // via set_transport, we change the scheme to mqtt:// for parsing.
+        if is_tls {
+            url.set_scheme("mqtt").map_err(|_| {
+                Pv2MqttError::MqttConnection("failed to set scheme to mqtt".to_string())
+            })?;
+        }
+
+        let mut mqttoptions = MqttOptions::parse_url(url.as_str()).map_err(|e| {
+            Pv2MqttError::MqttConnection(format!("Failed to parse URL for rumqttc: {}", e))
+        })?;
+        mqttoptions.set_keep_alive(MQTT_KEEPALIVE_INTERVAL_SECS);
+
+        if is_tls {
+            if self.config.cert_path.is_some() || self.config.key_path.is_some() {
+                info!("Using mTLS for MQTT connection");
+            }
+
+            let client_config = crate::tls::create_client_config(
+                Arc::clone(&self.root_cert_store),
+                self.config.ca_path.as_deref(),
+                self.config.cert_path.as_deref(),
+                self.config.key_path.as_deref(),
+            )?;
+
+            mqttoptions.set_transport(Transport::tls_with_config(TlsConfiguration::Rustls(
+                Arc::new(client_config),
+            )));
+        }
+
+        Ok(mqttoptions)
     }
 }
 

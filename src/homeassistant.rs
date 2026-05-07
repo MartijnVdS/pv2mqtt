@@ -165,7 +165,16 @@ impl HomeAssistantIntegration {
         messages
     }
 
-    fn collect_sensor_definitions(&self, model_id: Option<u16>) -> Vec<(&'static str, Option<&'static str>, Option<&'static str>, Option<&'static str>, &'static str)> {
+    fn collect_sensor_definitions(
+        &self,
+        model_id: Option<u16>,
+    ) -> Vec<(
+        &'static str,
+        Option<&'static str>,
+        Option<&'static str>,
+        Option<&'static str>,
+        &'static str,
+    )> {
         let mut sensors = vec![
             ("W", Some("W"), Some("power"), Some("measurement"), "Power"),
             (
@@ -217,12 +226,30 @@ impl HomeAssistantIntegration {
 
             if id == 701 {
                 sensors.extend(vec![
-                    ("TmpAmb", Some("°C"), Some("temperature"), Some("measurement"), "Ambient Temperature"),
-                    ("TmpSw", Some("°C"), Some("temperature"), Some("measurement"), "IGBT/MOSFET Temperature"),
+                    (
+                        "TmpAmb",
+                        Some("°C"),
+                        Some("temperature"),
+                        Some("measurement"),
+                        "Ambient Temperature",
+                    ),
+                    (
+                        "TmpSw",
+                        Some("°C"),
+                        Some("temperature"),
+                        Some("measurement"),
+                        "IGBT/MOSFET Temperature",
+                    ),
                     ("Alrm", None, None, None, "Alarms"),
                     ("MnAlrmInfo", None, None, None, "Manufacturer Alarm Info"),
                     ("DERMode", None, None, None, "DER Operational Mode"),
-                    ("ThrotPct", Some("%"), None, Some("measurement"), "Throttling Percentage"),
+                    (
+                        "ThrotPct",
+                        Some("%"),
+                        None,
+                        Some("measurement"),
+                        "Throttling Percentage",
+                    ),
                     ("ThrotSrc", None, None, None, "Throttling Source"),
                 ]);
             }

@@ -43,20 +43,50 @@ impl TaskManager {
             .expect("TaskManager can only be run once");
 
         // Spawn MQTT task
+        let mqtt_handle = self.spawn_mqtt_task(mqtt_rx);
+        info!("MQTT task spawned");
+
+        // Spawn Connection tasks
+        let connection_handles = self.spawn_connection_tasks();
+
+        // Wait for shutdown signal
+        self.wait_for_signal().await?;
+
+        // Graceful shutdown sequence
+        info!("Initiating graceful shutdown...");
+        self.shutdown_token.cancel();
+
+        // Wait for all connection tasks to finish
+        for handle in connection_handles {
+            let _ = handle.await;
+        }
+        info!("All connection tasks finished");
+
+        // Drop the sender to let MQTT task know we are done
+        drop(self.mqtt_tx);
+
+        // Wait for MQTT task to finish
+        let _ = mqtt_handle.await;
+        info!("MQTT task finished. Goodbye!");
+
+        Ok(())
+    }
+
+    fn spawn_mqtt_task(&self, mqtt_rx: mpsc::Receiver<MqttMessage>) -> JoinHandle<()> {
         let mqtt_config = self.config.mqtt.clone();
         let mqtt_certs = Arc::clone(&self.root_cert_store);
         let mqtt_cmd_tx = self.cmd_tx.clone();
-        let mqtt_handle = tokio::spawn(async move {
+
+        tokio::spawn(async move {
             let task = MqttTask::new(mqtt_config, mqtt_rx, mqtt_certs, mqtt_cmd_tx);
             match task.run().await {
                 Ok(_) => info!("MQTT task finished cleanly"),
                 Err(e) => error!("MQTT task failed: {}", e),
             }
-        });
+        })
+    }
 
-        info!("MQTT task spawned");
-
-        // Spawn Connection tasks
+    fn spawn_connection_tasks(&self) -> Vec<JoinHandle<()>> {
         let mut connection_handles = Vec::new();
         for conn_config in self.config.connections.clone() {
             let mqtt_tx = self.mqtt_tx.clone();
@@ -81,28 +111,7 @@ impl TaskManager {
             });
             connection_handles.push(handle);
         }
-
-        // Wait for shutdown signal
-        self.wait_for_signal().await?;
-
-        // Graceful shutdown sequence
-        info!("Initiating graceful shutdown...");
-        self.shutdown_token.cancel();
-
-        // Wait for all connection tasks to finish
-        for handle in connection_handles {
-            let _ = handle.await;
-        }
-        info!("All connection tasks finished");
-
-        // Drop the sender to let MQTT task know we are done
-        drop(self.mqtt_tx);
-
-        // Wait for MQTT task to finish
-        let _ = mqtt_handle.await;
-        info!("MQTT task finished. Goodbye!");
-
-        Ok(())
+        connection_handles
     }
 
     async fn wait_for_signal(&self) -> Result<()> {

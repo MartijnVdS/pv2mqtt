@@ -45,30 +45,28 @@ impl ConnectionTask {
         let res: Result<()> = async {
             use crate::commands::ControlAction;
 
-            let (base_addr, conn_off, pct_off, ena_off, sf_off) =
-                match device_state.active_control {
-                    ActiveControlModel::Model123 { base_addr } => (
-                        base_addr,
-                        Some(M123_CONN_OFFSET),
-                        M123_WMAX_LIM_PCT_OFFSET,
-                        M123_WMAX_LIM_ENA_OFFSET,
-                        M123_WMAX_LIM_PCT_SF_OFFSET,
-                    ),
-                    ActiveControlModel::Model704 { base_addr } => (
-                        base_addr,
-                        None,
-                        M704_WMAX_LIM_PCT_OFFSET,
-                        M704_WMAX_LIM_ENA_OFFSET,
-                        M704_WMAX_LIM_PCT_SF_OFFSET,
-                    ),
-                    ActiveControlModel::None => {
-                        return Err(Pv2MqttError::Modbus(ModbusError::from(
-                            std::io::Error::other(
-                                "Controls not supported or identified for device",
-                            ),
-                        )));
-                    }
-                };
+            let (base_addr, conn_off, pct_off, ena_off, sf_off) = match device_state.active_control
+            {
+                ActiveControlModel::Model123 { base_addr } => (
+                    base_addr,
+                    Some(M123_CONN_OFFSET),
+                    M123_WMAX_LIM_PCT_OFFSET,
+                    M123_WMAX_LIM_ENA_OFFSET,
+                    M123_WMAX_LIM_PCT_SF_OFFSET,
+                ),
+                ActiveControlModel::Model704 { base_addr } => (
+                    base_addr,
+                    None,
+                    M704_WMAX_LIM_PCT_OFFSET,
+                    M704_WMAX_LIM_ENA_OFFSET,
+                    M704_WMAX_LIM_PCT_SF_OFFSET,
+                ),
+                ActiveControlModel::None => {
+                    return Err(Pv2MqttError::Modbus(ModbusError::from(
+                        std::io::Error::other("Controls not supported or identified for device"),
+                    )));
+                }
+            };
 
             let mut modbus = ctx.lock().await;
             modbus.set_slave(Slave(unit_id));
