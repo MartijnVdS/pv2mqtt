@@ -76,119 +76,9 @@ impl HomeAssistantIntegration {
         active_control: crate::models::ActiveControlModel,
     ) -> Vec<MqttMessage> {
         let mut messages = Vec::new();
-        let mut sensors = vec![
-            ("W", Some("W"), Some("power"), Some("measurement"), "Power"),
-            (
-                "WH",
-                Some("Wh"),
-                Some("energy"),
-                Some("total_increasing"),
-                "Energy",
-            ),
-            (
-                "Hz",
-                Some("Hz"),
-                Some("frequency"),
-                Some("measurement"),
-                "Frequency",
-            ),
-            (
-                "TmpCab",
-                Some("°C"),
-                Some("temperature"),
-                Some("measurement"),
-                "Cabinet Temperature",
-            ),
-            (
-                "TmpSnk",
-                Some("°C"),
-                Some("temperature"),
-                Some("measurement"),
-                "Heat Sink Temperature",
-            ),
-            ("St", None, Some("enum"), None, "Status"),
-        ];
 
-        // Add phase-specific sensors based on model
-        if let Some(id) = model_id {
-            sensors.push((
-                "PhVphA",
-                Some("V"),
-                Some("voltage"),
-                Some("measurement"),
-                "Voltage Phase A",
-            ));
-            sensors.push((
-                "AphA",
-                Some("A"),
-                Some("current"),
-                Some("measurement"),
-                "Current Phase A",
-            ));
-
-            if id == 701 {
-                sensors.push((
-                    "TmpAmb",
-                    Some("°C"),
-                    Some("temperature"),
-                    Some("measurement"),
-                    "Ambient Temperature",
-                ));
-                sensors.push((
-                    "TmpSw",
-                    Some("°C"),
-                    Some("temperature"),
-                    Some("measurement"),
-                    "IGBT/MOSFET Temperature",
-                ));
-                sensors.push(("Alrm", None, None, None, "Alarms"));
-                sensors.push(("MnAlrmInfo", None, None, None, "Manufacturer Alarm Info"));
-                sensors.push(("DERMode", None, None, None, "DER Operational Mode"));
-                sensors.push((
-                    "ThrotPct",
-                    Some("%"),
-                    None,
-                    Some("measurement"),
-                    "Throttling Percentage",
-                ));
-                sensors.push(("ThrotSrc", None, None, None, "Throttling Source"));
-            }
-
-            if matches!(id, 102 | 103 | 112 | 113 | 701) {
-                sensors.push((
-                    "PhVphB",
-                    Some("V"),
-                    Some("voltage"),
-                    Some("measurement"),
-                    "Voltage Phase B",
-                ));
-                sensors.push((
-                    "AphB",
-                    Some("A"),
-                    Some("current"),
-                    Some("measurement"),
-                    "Current Phase B",
-                ));
-            }
-
-            if matches!(id, 103 | 113 | 701) {
-                sensors.push((
-                    "PhVphC",
-                    Some("V"),
-                    Some("voltage"),
-                    Some("measurement"),
-                    "Voltage Phase C",
-                ));
-                sensors.push((
-                    "AphC",
-                    Some("A"),
-                    Some("current"),
-                    Some("measurement"),
-                    "Current Phase C",
-                ));
-            }
-        }
-
+        // 1. Regular Sensors
+        let sensors = self.collect_sensor_definitions(model_id);
         for (name, unit, device_class, state_class, label) in sensors {
             let enabled_by_default = matches!(name, "W" | "WH" | "St");
             let options = if name == "St" {
@@ -232,38 +122,157 @@ impl HomeAssistantIntegration {
             });
         }
 
-        // Add binary sensors
-        let mut binary_sensors = Vec::new();
+        // 2. Binary Sensors
         if model_id == Some(701) {
-            binary_sensors.push(("ConnSt", Some("connectivity"), "Grid Connection Status"));
+            let binary_sensors = vec![("ConnSt", Some("connectivity"), "Grid Connection Status")];
+            for (name, device_class, label) in binary_sensors {
+                let ctx = DiscoveryContext {
+                    manufacturer,
+                    model,
+                    version,
+                    name,
+                    value_path: None,
+                    unit: None,
+                    device_class,
+                    state_class: None,
+                    label,
+                    enabled_by_default: true,
+                    options: None,
+                    component: Some("binary_sensor"),
+                    command_topic: None,
+                    entity_category: None,
+                    state_topic: None,
+                };
+                let (topic, payload) = self.discovery_message(serial, &ctx);
+                messages.push(MqttMessage::Publish {
+                    topic,
+                    payload,
+                    retain: true,
+                });
+            }
         }
 
-        for (name, device_class, label) in binary_sensors {
-            let ctx = DiscoveryContext {
-                manufacturer,
-                model,
-                version,
-                name,
-                value_path: None,
-                unit: None,
-                device_class,
-                state_class: None,
-                label,
-                enabled_by_default: true,
-                options: None,
-                component: Some("binary_sensor"),
-                command_topic: None,
-                entity_category: None,
-                state_topic: None,
-            };
-            let (topic, payload) = self.discovery_message(serial, &ctx);
-            messages.push(MqttMessage::Publish {
-                topic,
-                payload,
-                retain: true,
-            });
-        }
+        // 3. Controls and Cleanup
+        self.add_control_or_cleanup_messages(
+            &mut messages,
+            serial,
+            manufacturer,
+            model,
+            version,
+            active_control,
+        );
 
+        messages
+    }
+
+    fn collect_sensor_definitions(&self, model_id: Option<u16>) -> Vec<(&'static str, Option<&'static str>, Option<&'static str>, Option<&'static str>, &'static str)> {
+        let mut sensors = vec![
+            ("W", Some("W"), Some("power"), Some("measurement"), "Power"),
+            (
+                "WH",
+                Some("Wh"),
+                Some("energy"),
+                Some("total_increasing"),
+                "Energy",
+            ),
+            (
+                "Hz",
+                Some("Hz"),
+                Some("frequency"),
+                Some("measurement"),
+                "Frequency",
+            ),
+            (
+                "TmpCab",
+                Some("°C"),
+                Some("temperature"),
+                Some("measurement"),
+                "Cabinet Temperature",
+            ),
+            (
+                "TmpSnk",
+                Some("°C"),
+                Some("temperature"),
+                Some("measurement"),
+                "Heat Sink Temperature",
+            ),
+            ("St", None, Some("enum"), None, "Status"),
+        ];
+
+        if let Some(id) = model_id {
+            sensors.push((
+                "PhVphA",
+                Some("V"),
+                Some("voltage"),
+                Some("measurement"),
+                "Voltage Phase A",
+            ));
+            sensors.push((
+                "AphA",
+                Some("A"),
+                Some("current"),
+                Some("measurement"),
+                "Current Phase A",
+            ));
+
+            if id == 701 {
+                sensors.extend(vec![
+                    ("TmpAmb", Some("°C"), Some("temperature"), Some("measurement"), "Ambient Temperature"),
+                    ("TmpSw", Some("°C"), Some("temperature"), Some("measurement"), "IGBT/MOSFET Temperature"),
+                    ("Alrm", None, None, None, "Alarms"),
+                    ("MnAlrmInfo", None, None, None, "Manufacturer Alarm Info"),
+                    ("DERMode", None, None, None, "DER Operational Mode"),
+                    ("ThrotPct", Some("%"), None, Some("measurement"), "Throttling Percentage"),
+                    ("ThrotSrc", None, None, None, "Throttling Source"),
+                ]);
+            }
+
+            if matches!(id, 102 | 103 | 112 | 113 | 701) {
+                sensors.push((
+                    "PhVphB",
+                    Some("V"),
+                    Some("voltage"),
+                    Some("measurement"),
+                    "Voltage Phase B",
+                ));
+                sensors.push((
+                    "AphB",
+                    Some("A"),
+                    Some("current"),
+                    Some("measurement"),
+                    "Current Phase B",
+                ));
+            }
+
+            if matches!(id, 103 | 113 | 701) {
+                sensors.push((
+                    "PhVphC",
+                    Some("V"),
+                    Some("voltage"),
+                    Some("measurement"),
+                    "Voltage Phase C",
+                ));
+                sensors.push((
+                    "AphC",
+                    Some("A"),
+                    Some("current"),
+                    Some("measurement"),
+                    "Current Phase C",
+                ));
+            }
+        }
+        sensors
+    }
+
+    fn add_control_or_cleanup_messages(
+        &self,
+        messages: &mut Vec<MqttMessage>,
+        serial: &str,
+        manufacturer: &str,
+        model: &str,
+        version: Option<&str>,
+        active_control: crate::models::ActiveControlModel,
+    ) {
         if active_control != crate::models::ActiveControlModel::None {
             let mut controls = Vec::new();
 
@@ -347,8 +356,6 @@ impl HomeAssistantIntegration {
                 });
             }
         }
-
-        messages
     }
 
     pub fn generate_nameplate_discovery_messages(
