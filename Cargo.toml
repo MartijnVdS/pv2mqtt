@@ -8,7 +8,7 @@ unsafe_code = "forbid"
 
 [dependencies]
 tokio = { version = "1", features = [
-    "rt-multi-thread",
+    "rt",
     "macros",
     "sync",
     "time",
@@ -56,6 +56,6 @@ opt-level = "z"
 [dev-dependencies]
 approx = "0.5"
 rcgen = "0.14"
-tokio = { version = "1", features = [ "test-util" ] }
-tokio-modbus = { version = "0.17", features = [ "server", "tcp-server" ] }
+tokio = { version = "1", features = ["test-util"] }
+tokio-modbus = { version = "0.17", features = ["server", "tcp-server"] }
 tracing-test = "0.2"
