@@ -105,7 +105,7 @@ impl ConnectionConfig {
                             address, self.name
                         )));
                     }
-                    let _: u16 = parts[1].parse().map_err(|e| {
+                    parts[1].parse::<u16>().map_err(|e| {
                         Pv2MqttError::Config(format!(
                             "Invalid port in TCP address '{}' in connection '{}': {}",
                             address, self.name, e
