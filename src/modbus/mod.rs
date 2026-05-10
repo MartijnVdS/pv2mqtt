@@ -14,14 +14,15 @@ use crate::mqtt::MqttMessage;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use sunspec::client::{AsyncClient, Config as SunSpecConfig};
-use tokio::sync::Mutex;
-use tokio::sync::mpsc;
-use tokio_modbus::Slave;
-use tokio_modbus::client::{Context as ModbusContext, rtu, tcp};
-use tokio_rustls::TlsConnector;
-use tokio_rustls::rustls::pki_types::ServerName;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
+use tokio::sync::{Mutex, mpsc};
+use tokio_modbus::{
+    Slave,
+    client::{Context as ModbusContext, rtu, tcp},
+};
+use tokio_rustls::{TlsConnector, rustls::pki_types::ServerName};
 use tokio_serial::SerialStream;
-use tokio_util::sync::CancellationToken;
+use tokio_util::{either, sync::CancellationToken};
 use tracing::{Instrument, debug, error, info, info_span, warn};
 
 pub const COMMAND_POLL_DELAY_MILLIS: u64 = 250;
@@ -31,6 +32,7 @@ pub const MIN_SLEEP_MILLIS: u64 = 10;
 pub const POLL_TIMEOUT_SECS: u64 = 10;
 pub const READ_TIMEOUT_SECS: u64 = 10;
 pub const RECONNECT_TIMEOUT_SECS: u64 = 10;
+pub const STALE_DATA_WAIT_MILLIS: u64 = 100;
 
 // SunSpec Model 123 (Immediate Controls) Data-Relative Offsets (Spec Offset - 2)
 // These match the 'offset' attribute in SunSpec smdx_00123.xml
@@ -267,6 +269,70 @@ impl ConnectionTask {
         }
     }
 
+    // Set up TLS on a TCP connection
+    async fn connect_tls(
+        &self,
+        stream: tokio::net::TcpStream,
+        address: &String,
+        ca_path: Option<&str>,
+        cert_path: Option<&str>,
+        key_path: Option<&str>,
+    ) -> Result<tokio_rustls::client::TlsStream<tokio::net::TcpStream>> {
+        let client_config = crate::tls::create_client_config(
+            Arc::clone(&self.root_cert_store),
+            ca_path,
+            cert_path,
+            key_path,
+        )?;
+        let connector = TlsConnector::from(Arc::new(client_config));
+        let host = address
+            .split(':')
+            .next()
+            .ok_or_else(|| Pv2MqttError::Config("Invalid address".to_string()))?;
+        let server_name = ServerName::try_from(host)
+            .map_err(|e| Pv2MqttError::Config(format!("invalid server name: {}", e)))?
+            .to_owned();
+        let tls_stream = tokio::time::timeout(
+            Duration::from_secs(CONNECT_TIMEOUT_SECS),
+            connector.connect(server_name, stream),
+        )
+        .await
+        .map_err(|_| {
+            ModbusError::Timeout(format!("Timeout during TLS handshake with {}", address))
+        })??;
+
+        Ok(tls_stream)
+    }
+
+    async fn drain_stale_data<T>(&self, stream: &mut T) -> Result<()>
+    where
+        T: AsyncRead + AsyncWrite + Send + Unpin,
+    {
+        let mut discard_buf = [0u8; 512];
+        let mut total_discarded = 0;
+
+        while let Ok(Ok(n)) = tokio::time::timeout(
+            Duration::from_millis(STALE_DATA_WAIT_MILLIS),
+            stream.read(&mut discard_buf),
+        )
+        .await
+        {
+            total_discarded += n;
+            if n == 0 {
+                break;
+            }
+        }
+
+        if total_discarded > 0 {
+            info!(
+                "Discarded {} stale bytes from previous session",
+                total_discarded
+            );
+        }
+
+        Ok(())
+    }
+
     async fn establish_connection(&self) -> Result<ModbusContext> {
         match &self.config.modbus {
             ModbusConfig::Tcp {
@@ -277,7 +343,7 @@ impl ConnectionTask {
                 key_path,
             } => {
                 info!("Connecting to Modbus TCP at {} (TLS: {})", address, tls);
-                let stream = tokio::time::timeout(
+                let tcp_stream = tokio::time::timeout(
                     Duration::from_secs(CONNECT_TIMEOUT_SECS),
                     tokio::net::TcpStream::connect(address),
                 )
@@ -286,38 +352,26 @@ impl ConnectionTask {
                     ModbusError::Timeout(format!("Timeout connecting to {}", address))
                 })??;
 
-                let _ = stream.set_nodelay(true);
+                tcp_stream.set_nodelay(true)?;
 
-                if *tls {
-                    let client_config = crate::tls::create_client_config(
-                        Arc::clone(&self.root_cert_store),
-                        ca_path.as_deref(),
-                        cert_path.as_deref(),
-                        key_path.as_deref(),
-                    )?;
-                    let connector = TlsConnector::from(Arc::new(client_config));
-                    let host = address
-                        .split(':')
-                        .next()
-                        .ok_or_else(|| Pv2MqttError::Config("Invalid address".to_string()))?;
-                    let server_name = ServerName::try_from(host)
-                        .map_err(|e| Pv2MqttError::Config(format!("invalid server name: {}", e)))?
-                        .to_owned();
-                    let tls_stream = tokio::time::timeout(
-                        Duration::from_secs(CONNECT_TIMEOUT_SECS),
-                        connector.connect(server_name, stream),
-                    )
-                    .await
-                    .map_err(|_| {
-                        ModbusError::Timeout(format!(
-                            "Timeout during TLS handshake with {}",
-                            address
-                        ))
-                    })??;
-                    Ok(tcp::attach(tls_stream))
+                let mut stream = if *tls {
+                    let tls_stream = self
+                        .connect_tls(
+                            tcp_stream,
+                            address,
+                            ca_path.as_deref(),
+                            cert_path.as_deref(),
+                            key_path.as_deref(),
+                        )
+                        .await?;
+                    either::Either::Left(tls_stream)
                 } else {
-                    Ok(tcp::attach(stream))
-                }
+                    either::Either::Right(tcp_stream)
+                };
+
+                self.drain_stale_data(&mut stream).await?;
+
+                Ok(tcp::attach(stream))
             }
             ModbusConfig::Rtu {
                 device,

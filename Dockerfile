@@ -21,14 +21,14 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/src/pv2mqtt/target \
     case "$TARGETPLATFORM" in \
         "linux/amd64") \
-            cargo build --release && \
+            cargo build --locked --release && \
             cp target/release/pv2mqtt /usr/src/pv2mqtt/pv2mqtt ;; \
         "linux/arm64") \
             rustup target add aarch64-unknown-linux-gnu && \
             export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc && \
             export PKG_CONFIG_ALLOW_CROSS=1 && \
             export PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig && \
-            cargo build --release --target aarch64-unknown-linux-gnu && \
+            cargo build --locked --release --target aarch64-unknown-linux-gnu && \
             cp target/aarch64-unknown-linux-gnu/release/pv2mqtt /usr/src/pv2mqtt/pv2mqtt ;; \
     esac
 
