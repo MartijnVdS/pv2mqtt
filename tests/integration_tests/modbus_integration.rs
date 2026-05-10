@@ -191,9 +191,9 @@ async fn test_successful_poll_logic() {
 
     // Collect messages by advancing time in small increments
     let mut messages = Vec::new();
-    // Discovery (12) + cleanup for disabled controls (3) + at least one poll (2: Data + Status) = 17 messages
+    // Discovery (1) + at least one poll (2: Data + Status) = 3 messages
     let mut timeout_counter = 0;
-    while messages.len() < 17 && timeout_counter < 500 {
+    while messages.len() < 3 && timeout_counter < 500 {
         tokio::time::advance(Duration::from_millis(10)).await;
         while let Ok(msg) = rx.try_recv() {
             messages.push(msg);
@@ -202,12 +202,11 @@ async fn test_successful_poll_logic() {
     }
 
     assert!(
-        messages.len() >= 17,
-        "Should have received at least 17 MQTT messages, got {}",
+        messages.len() >= 3,
+        "Should have received at least 3 MQTT messages, got {}",
         messages.len()
     );
 
-    // We expect discovery messages (12) + at least one poll (Data + Status)
     // Discovery messages have topics starting with homeassistant/
     let discovery_msgs: Vec<_> = messages
         .iter()
@@ -216,25 +215,19 @@ async fn test_successful_poll_logic() {
             topic.starts_with("homeassistant/")
         })
         .collect();
-    assert!(
-        discovery_msgs.len() >= 12,
-        "Should have several discovery messages"
+    assert_eq!(
+        discovery_msgs.len(), 1,
+        "Should have exactly 1 modern discovery message"
     );
 
-    // Verify one specific discovery message (e.g., Power sensor 'W')
-    let w_discovery = discovery_msgs
-        .iter()
-        .find(|m| {
-            let MqttMessage::Publish { topic, .. } = m;
-            topic.contains("/W/")
-        })
-        .expect("Should have discovery for 'W'");
+    // Verify modern discovery message
+    let device_discovery = discovery_msgs[0];
 
-    let MqttMessage::Publish { topic, payload, .. } = w_discovery;
-    assert_eq!(*topic, "homeassistant/sensor/SN1234/W/config");
+    let MqttMessage::Publish { topic, payload, .. } = device_discovery;
+    assert_eq!(*topic, "homeassistant/device/SN1234/config");
     let payload_str = String::from_utf8_lossy(payload);
-    assert!(payload_str.contains("\"manufacturer\":\"Brand\""));
-    assert!(payload_str.contains("\"model\":\"Model\""));
+    assert!(payload_str.contains("\"mf\":\"Brand\""));
+    assert!(payload_str.contains("\"mdl\":\"Model\""));
     assert!(payload_str.contains("\"unique_id\":\"solar_SN1234_W\""));
 
     // Check for data messages
@@ -741,7 +734,7 @@ async fn test_discovery_reads_nameplate_and_publishes() {
     tokio::time::advance(Duration::from_secs(1)).await;
 
     let mut found_nameplate_payload = false;
-    let mut discovery_msg_count = 0;
+    let mut found_modern_discovery = false;
 
     for _ in 0..1000 {
         tokio::time::advance(Duration::from_millis(10)).await;
@@ -754,26 +747,21 @@ async fn test_discovery_reads_nameplate_and_publishes() {
                 assert_eq!(val["VAMax"], 5500.0);
                 assert_eq!(val["VArMaxInj"], 2500.0);
                 assert!(val["VArMaxAbs"].is_null()); // Verified Option logic
-            } else if topic.starts_with("homeassistant/")
-                && topic.contains("/config")
-                && (topic.contains("/WMax/")
-                    || topic.contains("/VAMax/")
-                    || topic.contains("/VArMaxInj/")
-                    || topic.contains("/VArMaxAbs/"))
-            {
-                discovery_msg_count += 1;
+            } else if topic.starts_with("homeassistant/device/") && topic.contains("/config") {
+                found_modern_discovery = true;
+                let val: serde_json::Value = serde_json::from_slice(&payload).unwrap();
+                let cmps = val["cmps"].as_object().unwrap();
+                assert!(cmps.contains_key("WMax"));
+                assert!(cmps.contains_key("VAMax"));
             }
         }
-        if found_nameplate_payload && discovery_msg_count == 4 {
+        if found_nameplate_payload && found_modern_discovery {
             break;
         }
     }
 
     assert!(found_nameplate_payload, "Nameplate payload not found");
-    assert_eq!(
-        discovery_msg_count, 4,
-        "Expected 4 HA discovery messages for nameplate"
-    );
+    assert!(found_modern_discovery, "Modern discovery message not found");
 
     token_clone.cancel();
 }

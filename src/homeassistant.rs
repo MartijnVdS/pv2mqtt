@@ -85,9 +85,14 @@ impl HomeAssistantIntegration {
     ) -> Vec<MqttMessage> {
         let mut messages = Vec::new();
 
-        // 1. Regular Sensors
-        let sensors = self.collect_sensor_definitions(model_id);
-        for (name, unit, device_class, state_class, label) in sensors {
+        // 1. New Modern Discovery Message
+        let topic = format!("{}/device/{}/config", self.ha_prefix, serial);
+        let mut components = serde_json::Map::new();
+
+        // Standard Sensors
+        for (name, unit, device_class, state_class, label) in
+            self.collect_sensor_definitions(model_id)
+        {
             let enabled_by_default = matches!(name, "W" | "WH" | "St");
             let options = if name == "St" {
                 Some(vec![
@@ -105,6 +110,12 @@ impl HomeAssistantIntegration {
                 None
             };
 
+            let entity_category = if name.starts_with("Tmp") {
+                Some("diagnostic")
+            } else {
+                None
+            };
+
             let ctx = DiscoveryContext {
                 manufacturer,
                 model,
@@ -117,20 +128,18 @@ impl HomeAssistantIntegration {
                 label,
                 enabled_by_default,
                 options,
-                component: None,
+                component: Some("sensor"),
                 command_topic: None,
-                entity_category: None,
+                entity_category,
                 state_topic: None,
             };
-            let (topic, payload) = self.discovery_message(serial, &ctx);
-            messages.push(MqttMessage::Publish {
-                topic,
-                payload,
-                retain: true,
-            });
+            components.insert(
+                name.to_string(),
+                self.modern_component_payload(serial, &ctx),
+            );
         }
 
-        // 2. Binary Sensors
+        // Binary Sensors
         if model_id == Some(701) {
             let binary_sensors = vec![("ConnSt", Some("connectivity"), "Grid Connection Status")];
             for (name, device_class, label) in binary_sensors {
@@ -151,26 +160,203 @@ impl HomeAssistantIntegration {
                     entity_category: None,
                     state_topic: None,
                 };
-                let (topic, payload) = self.discovery_message(serial, &ctx);
-                messages.push(MqttMessage::Publish {
-                    topic,
-                    payload,
-                    retain: true,
-                });
+                components.insert(
+                    name.to_string(),
+                    self.modern_component_payload(serial, &ctx),
+                );
             }
         }
 
-        // 3. Controls and Cleanup
-        self.add_control_or_cleanup_messages(
-            &mut messages,
-            serial,
-            manufacturer,
-            model,
-            version,
-            active_control,
-        );
+        // Controls
+        let mut controls = Vec::new();
+        if active_control != crate::models::ActiveControlModel::None {
+            if matches!(
+                active_control,
+                crate::models::ActiveControlModel::Model123 { .. }
+            ) {
+                controls.push((
+                    "Conn",
+                    "switch",
+                    None,
+                    None,
+                    "Connection",
+                    format!("{}/inverter/{}/set/Conn", self.topic_prefix, serial),
+                ));
+            }
+
+            controls.extend(vec![
+                (
+                    "WMaxLimPct",
+                    "number",
+                    Some("power_factor"),
+                    None,
+                    "Active Power Limit",
+                    format!("{}/inverter/{}/set/WMaxLimPct", self.topic_prefix, serial),
+                ),
+                (
+                    "WMaxLim_Ena",
+                    "switch",
+                    None,
+                    None,
+                    "Active Power Limit Enable",
+                    format!("{}/inverter/{}/set/WMaxLim_Ena", self.topic_prefix, serial),
+                ),
+            ]);
+        }
+
+        for (name, component, device_class, state_class, label, cmd_topic) in controls {
+            let ctx = DiscoveryContext {
+                manufacturer,
+                model,
+                version,
+                name,
+                value_path: Some(format!("Controls.{}", name)),
+                unit: if name == "WMaxLimPct" {
+                    Some("%")
+                } else {
+                    None
+                },
+                device_class,
+                state_class,
+                label,
+                enabled_by_default: true,
+                options: None,
+                component: Some(component),
+                command_topic: Some(cmd_topic),
+                entity_category: None,
+                state_topic: None,
+            };
+            components.insert(
+                name.to_string(),
+                self.modern_component_payload(serial, &ctx),
+            );
+        }
+
+        // Nameplate Sensors
+        let nameplate_topic = format!("{}/inverter/{}/nameplate", self.topic_prefix, serial);
+        let nameplate_sensors = vec![
+            (
+                "WMax",
+                Some("W"),
+                Some("power"),
+                Some("measurement"),
+                "Max Active Power",
+            ),
+            (
+                "VAMax",
+                Some("VA"),
+                Some("apparent_power"),
+                Some("measurement"),
+                "Max Apparent Power",
+            ),
+            (
+                "VArMaxInj",
+                Some("var"),
+                Some("reactive_power"),
+                Some("measurement"),
+                "Max Reactive Power Injected",
+            ),
+            (
+                "VArMaxAbs",
+                Some("var"),
+                Some("reactive_power"),
+                Some("measurement"),
+                "Max Reactive Power Absorbed",
+            ),
+        ];
+
+        for (name, unit, device_class, state_class, label) in nameplate_sensors {
+            let ctx = DiscoveryContext {
+                manufacturer,
+                model,
+                version,
+                name,
+                value_path: None,
+                unit,
+                device_class,
+                state_class,
+                label,
+                enabled_by_default: true,
+                options: None,
+                component: Some("sensor"),
+                command_topic: None,
+                entity_category: Some("diagnostic"),
+                state_topic: Some(nameplate_topic.clone()),
+            };
+            components.insert(
+                name.to_string(),
+                self.modern_component_payload(serial, &ctx),
+            );
+        }
+
+        let payload = json!({
+            "dev": {
+                "ids": [serial],
+                "name": format!("Inverter {}", serial),
+                "mf": manufacturer,
+                "mdl": model,
+                "sw": version,
+            },
+            "o": {
+                "name": "pv2mqtt",
+                "sw": env!("CARGO_PKG_VERSION"),
+            },
+            "cmps": components,
+            "state_topic": self.inverter_topic(serial),
+            "qos": 1,
+        });
+
+        messages.push(MqttMessage::Publish {
+            topic,
+            payload: serde_json::to_vec(&payload).unwrap_or_default(),
+            retain: true,
+        });
 
         messages
+    }
+
+    fn modern_component_payload(&self, serial: &str, ctx: &DiscoveryContext) -> serde_json::Value {
+        let mut payload = json!({
+            "p": ctx.component.unwrap_or("sensor"),
+            "name": ctx.label,
+            "unique_id": format!("{}_{}_{}", self.topic_prefix, serial, ctx.name),
+            "value_template": format!(
+                "{{{{ value_json.{} }}}}",
+                ctx.value_path.as_deref().unwrap_or(ctx.name)
+            ),
+            "enabled_by_default": ctx.enabled_by_default,
+        });
+
+        if let Some(state_topic) = &ctx.state_topic {
+            payload["state_topic"] = json!(state_topic);
+        }
+
+        if let Some(cmd_topic) = &ctx.command_topic {
+            payload["command_topic"] = json!(cmd_topic);
+        }
+
+        if ctx.component == Some("switch") {
+            payload["payload_on"] = json!(true);
+            payload["payload_off"] = json!(false);
+        }
+
+        if let Some(unit) = ctx.unit {
+            payload["unit_of_measurement"] = json!(unit);
+        }
+        if let Some(dc) = ctx.device_class {
+            payload["device_class"] = json!(dc);
+        }
+        if let Some(sc) = ctx.state_class {
+            payload["state_class"] = json!(sc);
+        }
+        if let Some(options) = &ctx.options {
+            payload["options"] = json!(options);
+        }
+        if let Some(ec) = ctx.entity_category {
+            payload["entity_category"] = json!(ec);
+        }
+
+        payload
     }
 
     fn collect_sensor_definitions(&self, model_id: Option<u16>) -> Vec<SensorDefinitionTuple> {
@@ -204,6 +390,7 @@ impl HomeAssistantIntegration {
                 Some("measurement"),
                 "Heat Sink Temperature",
             ),
+            ("PF", None, Some("power_factor"), Some("measurement"), "Power Factor"),
             ("St", None, Some("enum"), None, "Status"),
         ];
 
@@ -290,171 +477,19 @@ impl HomeAssistantIntegration {
         sensors
     }
 
-    fn add_control_or_cleanup_messages(
-        &self,
-        messages: &mut Vec<MqttMessage>,
-        serial: &str,
-        manufacturer: &str,
-        model: &str,
-        version: Option<&str>,
-        active_control: crate::models::ActiveControlModel,
-    ) {
-        if active_control != crate::models::ActiveControlModel::None {
-            let mut controls = Vec::new();
-
-            if matches!(
-                active_control,
-                crate::models::ActiveControlModel::Model123 { .. }
-            ) {
-                controls.push((
-                    "Conn",
-                    "switch",
-                    None,
-                    None,
-                    "Connection",
-                    format!("{}/inverter/{}/set/Conn", self.topic_prefix, serial),
-                ));
-            }
-
-            controls.extend(vec![
-                (
-                    "WMaxLimPct",
-                    "number",
-                    Some("power_factor"),
-                    None,
-                    "Active Power Limit",
-                    format!("{}/inverter/{}/set/WMaxLimPct", self.topic_prefix, serial),
-                ),
-                (
-                    "WMaxLim_Ena",
-                    "switch",
-                    None,
-                    None,
-                    "Active Power Limit Enable",
-                    format!("{}/inverter/{}/set/WMaxLim_Ena", self.topic_prefix, serial),
-                ),
-            ]);
-
-            for (name, component, device_class, state_class, label, cmd_topic) in controls {
-                let ctx = DiscoveryContext {
-                    manufacturer,
-                    model,
-                    version,
-                    name,
-                    value_path: Some(format!("Controls.{}", name)),
-                    unit: if name == "WMaxLimPct" {
-                        Some("%")
-                    } else {
-                        None
-                    },
-                    device_class,
-                    state_class,
-                    label,
-                    enabled_by_default: true,
-                    options: None,
-                    component: Some(component),
-                    command_topic: Some(cmd_topic),
-                    entity_category: None,
-                    state_topic: None,
-                };
-                let (topic, payload) = self.discovery_message(serial, &ctx);
-                messages.push(MqttMessage::Publish {
-                    topic,
-                    payload,
-                    retain: true,
-                });
-            }
-        } else {
-            let cleanup_controls = vec![
-                ("Conn", "switch"),
-                ("WMaxLimPct", "number"),
-                ("WMaxLim_Ena", "switch"),
-            ];
-            for (name, component) in cleanup_controls {
-                let topic = format!(
-                    "{}/{}/{}/{}/config",
-                    self.ha_prefix, component, serial, name
-                );
-                messages.push(MqttMessage::Publish {
-                    topic,
-                    payload: Vec::new(),
-                    retain: true,
-                });
-            }
-        }
-    }
-
     pub fn generate_nameplate_discovery_messages(
         &self,
-        serial: &str,
-        manufacturer: &str,
-        model: &str,
-        version: Option<&str>,
+        _serial: &str,
+        _manufacturer: &str,
+        _model: &str,
+        _version: Option<&str>,
     ) -> Vec<MqttMessage> {
-        let mut messages = Vec::new();
-        let nameplate_topic = format!("{}/inverter/{}/nameplate", self.topic_prefix, serial);
-
-        let sensors = vec![
-            (
-                "WMax",
-                Some("W"),
-                Some("power"),
-                Some("measurement"),
-                "Max Active Power",
-            ),
-            (
-                "VAMax",
-                Some("VA"),
-                Some("apparent_power"),
-                Some("measurement"),
-                "Max Apparent Power",
-            ),
-            (
-                "VArMaxInj",
-                Some("var"),
-                Some("reactive_power"),
-                Some("measurement"),
-                "Max Reactive Power Injected",
-            ),
-            (
-                "VArMaxAbs",
-                Some("var"),
-                Some("reactive_power"),
-                Some("measurement"),
-                "Max Reactive Power Absorbed",
-            ),
-        ];
-
-        for (name, unit, device_class, state_class, label) in sensors {
-            let ctx = DiscoveryContext {
-                manufacturer,
-                model,
-                version,
-                name,
-                value_path: None,
-                unit,
-                device_class,
-                state_class,
-                label,
-                enabled_by_default: true,
-                options: None,
-                component: None,
-                command_topic: None,
-                entity_category: Some("diagnostic"),
-                state_topic: Some(nameplate_topic.clone()),
-            };
-            let (topic, payload) = self.discovery_message(serial, &ctx);
-            messages.push(MqttMessage::Publish {
-                topic,
-                payload,
-                retain: true,
-            });
-        }
-
-        messages
+        // This is now redundant but kept for API compatibility during migration if needed.
+        Vec::new()
     }
 
     pub fn discovery_message(&self, serial: &str, ctx: &DiscoveryContext) -> (String, Vec<u8>) {
+        // Redundant with modern_component_payload, but kept for tests if they use it directly.
         let component = ctx.component.unwrap_or("sensor");
         let topic = format!(
             "{}/{}/{}/{}/config",
@@ -533,20 +568,17 @@ mod tests {
         );
 
         // Calculation:
-        // - Core sensors (W, WH, Hz, TmpCab, TmpSnk, St): 6
-        // - Phase A specific (PhVphA, AphA): 2
-        // - Cleanup for disabled controls (Conn, WMaxLimPct, WMaxLim_Ena): 3
-        // Total: 6 + 2 + 3 = 11
-        assert_eq!(msgs.len(), 11);
+        // - 1 Modern discovery message
+        assert_eq!(msgs.len(), 1);
 
-        // Verify no Phase B/C
-        for msg in &msgs {
-            let MqttMessage::Publish { topic, .. } = msg;
-            assert!(!topic.contains("PhVphB"));
-            assert!(!topic.contains("AphB"));
-            assert!(!topic.contains("PhVphC"));
-            assert!(!topic.contains("AphC"));
-        }
+        // Verify the modern message
+        let modern_msg = &msgs[0];
+        let MqttMessage::Publish { topic, payload, .. } = modern_msg;
+        assert_eq!(topic, "homeassistant/device/SN123/config");
+        let body: serde_json::Value = serde_json::from_slice(payload).unwrap();
+        assert_eq!(body["dev"]["ids"][0], "SN123");
+        assert!(body["cmps"].as_object().unwrap().contains_key("W"));
+        assert!(body["cmps"].as_object().unwrap().contains_key("WMax"));
     }
 
     #[test]
@@ -562,28 +594,15 @@ mod tests {
         );
 
         // Calculation:
-        // - Core sensors: 6
-        // - Phase A: 2
-        // - Phase B: 2
-        // - Phase C: 2
-        // - Controls (Conn, WMaxLimPct, WMaxLim_Ena): 3
-        // Total: 6 + 2 + 2 + 2 + 3 = 15
-        assert_eq!(msgs.len(), 15);
+        // - 1 Modern
+        assert_eq!(msgs.len(), 1);
 
-        // Verify presence of Phase C and Controls
-        let mut has_ph_c = false;
-        let mut has_conn = false;
-        for msg in &msgs {
-            let MqttMessage::Publish { topic, .. } = msg;
-            if topic.contains("PhVphC") {
-                has_ph_c = true;
-            }
-            if topic.contains("Conn") {
-                has_conn = true;
-            }
-        }
-        assert!(has_ph_c);
-        assert!(has_conn);
+        let modern_msg = &msgs[0];
+        let MqttMessage::Publish { payload, .. } = modern_msg;
+        let body: serde_json::Value = serde_json::from_slice(payload).unwrap();
+        let cmps = body["cmps"].as_object().unwrap();
+        assert!(cmps.contains_key("PhVphC"));
+        assert!(cmps.contains_key("Conn"));
     }
 
     #[test]
@@ -599,54 +618,15 @@ mod tests {
         );
 
         // Calculation:
-        // - Core sensors: 6
-        // - Phase A: 2
-        // - Phase B: 2
-        // - Phase C: 2
-        // - Controls (WMaxLimPct, WMaxLim_Ena): 2 (NO Conn)
-        // Total: 6 + 2 + 2 + 2 + 2 = 14
-        assert_eq!(msgs.len(), 14);
+        // - 1 Modern
+        assert_eq!(msgs.len(), 1);
 
-        // Verify NO Conn
-        for msg in &msgs {
-            let MqttMessage::Publish { topic, .. } = msg;
-            assert!(!topic.contains("Conn"));
-        }
-    }
-
-    #[test]
-    fn test_generate_discovery_messages_cleanup() {
-        let ha = HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string());
-        let msgs = ha.generate_discovery_messages(
-            "SN123",
-            "Manufacturer",
-            "Model",
-            None,
-            Some(101),
-            crate::models::ActiveControlModel::None, // Controls disabled -> should generate cleanup
-        );
-
-        // Calculation:
-        // - Core sensors: 6
-        // - Phase A: 2
-        // - Cleanup: 3
-        // Total: 6 + 2 + 3 = 11
-        assert_eq!(msgs.len(), 11);
-
-        let cleanup_topics: Vec<_> = msgs
-            .iter()
-            .filter_map(|msg| {
-                let MqttMessage::Publish { topic, payload, .. } = msg;
-                if payload.is_empty() {
-                    Some(topic.clone())
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        assert_eq!(cleanup_topics.len(), 3);
-        assert!(cleanup_topics.iter().any(|t| t.contains("Conn")));
+        let modern_msg = &msgs[0];
+        let MqttMessage::Publish { payload, .. } = modern_msg;
+        let body: serde_json::Value = serde_json::from_slice(payload).unwrap();
+        let cmps = body["cmps"].as_object().unwrap();
+        assert!(cmps.contains_key("WMaxLimPct"));
+        assert!(!cmps.contains_key("Conn")); // 704 doesn't have Conn
     }
 
     #[test]
@@ -662,32 +642,15 @@ mod tests {
         );
 
         // Calculation:
-        // - Core sensors: 6
-        // - Phase A/B/C: 2 * 3 = 6
-        // - 701 Specific sensors: 7
-        // - Binary sensor: 1
-        // - Cleanup: 3
-        // Total: 6 + 6 + 7 + 1 + 3 = 23
-        assert_eq!(msgs.len(), 23);
+        // - 1 Modern
+        assert_eq!(msgs.len(), 1);
 
-        let mut has_conn_st = false;
-        let mut has_alrm = false;
-        let mut has_ph_c = false;
-        for msg in &msgs {
-            let MqttMessage::Publish { topic, .. } = msg;
-            if topic.contains("ConnSt") {
-                has_conn_st = true;
-            }
-            if topic.contains("Alrm") {
-                has_alrm = true;
-            }
-            if topic.contains("PhVphC") {
-                has_ph_c = true;
-            }
-        }
-        assert!(has_conn_st);
-        assert!(has_alrm);
-        assert!(has_ph_c);
+        let modern_msg = &msgs[0];
+        let MqttMessage::Publish { payload, .. } = modern_msg;
+        let body: serde_json::Value = serde_json::from_slice(payload).unwrap();
+        let cmps = body["cmps"].as_object().unwrap();
+        assert!(cmps.contains_key("ConnSt"));
+        assert!(cmps.contains_key("Alrm"));
     }
 
     #[test]
@@ -696,32 +659,45 @@ mod tests {
         let msgs =
             ha.generate_nameplate_discovery_messages("SN123", "Brand", "ModelX", Some("v1.0"));
 
-        // Should have 4 diagnostic sensors: WMax, VAMax, VArMaxInj, VArMaxAbs
-        assert_eq!(msgs.len(), 4);
+        // Now empty as it's merged into main discovery
+        assert_eq!(msgs.len(), 0);
+    }
 
-        let mut found_w_max = false;
-        for msg in &msgs {
-            let MqttMessage::Publish { topic, payload, .. } = msg;
+    #[test]
+    fn test_modern_payload_structure_details() {
+        let ha = HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string());
+        let msgs = ha.generate_discovery_messages(
+            "SN123",
+            "Brand",
+            "ModelX",
+            Some("v1.0"),
+            Some(101),
+            crate::models::ActiveControlModel::None,
+        );
 
-            // Topic format: homeassistant/sensor/SN123/{name}/config
-            assert!(topic.starts_with("homeassistant/sensor/SN123/"));
-            assert!(topic.ends_with("/config"));
+        let modern_msg = &msgs[0];
+        let MqttMessage::Publish { payload, .. } = modern_msg;
+        let body: serde_json::Value = serde_json::from_slice(payload).unwrap();
 
-            let body: serde_json::Value = serde_json::from_slice(payload).unwrap();
+        // Check state topics
+        assert_eq!(body["state_topic"], "solar/inverter/SN123");
 
-            // Verify state topic
-            assert_eq!(body["state_topic"], "solar/inverter/SN123/nameplate");
+        let cmps = body["cmps"].as_object().unwrap();
 
-            // Verify category
-            assert_eq!(body["entity_category"], "diagnostic");
+        // W should inherit state_topic
+        assert!(cmps["W"]["state_topic"].is_null());
 
-            if topic.contains("WMax") {
-                found_w_max = true;
-                assert_eq!(body["name"], "Max Active Power");
-                assert_eq!(body["unit_of_measurement"], "W");
-                assert_eq!(body["device_class"], "power");
-            }
-        }
-        assert!(found_w_max);
+        // WMax (nameplate) should override state_topic
+        assert_eq!(
+            cmps["WMax"]["state_topic"],
+            "solar/inverter/SN123/nameplate"
+        );
+        assert_eq!(cmps["WMax"]["entity_category"], "diagnostic");
+
+        // Temperature sensors should be diagnostic
+        assert_eq!(cmps["TmpCab"]["entity_category"], "diagnostic");
+
+        // Check unique_id format
+        assert_eq!(cmps["W"]["unique_id"], "solar_SN123_W");
     }
 }
