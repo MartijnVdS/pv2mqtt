@@ -35,124 +35,65 @@ impl ToStatusString for sunspec::models::model701::ConnSt {
 }
 
 fn map_alrm(alrm: Alrm701) -> Option<Vec<String>> {
-    let mut flags = Vec::new();
-    if alrm.contains(Alrm701::GroundFault) {
-        flags.push("GROUND_FAULT".to_string());
-    }
-    if alrm.contains(Alrm701::DcOverVolt) {
-        flags.push("DC_OVER_VOLT".to_string());
-    }
-    if alrm.contains(Alrm701::AcDisconnect) {
-        flags.push("AC_DISCONNECT".to_string());
-    }
-    if alrm.contains(Alrm701::DcDisconnect) {
-        flags.push("DC_DISCONNECT".to_string());
-    }
-    if alrm.contains(Alrm701::GridDisconnect) {
-        flags.push("GRID_DISCONNECT".to_string());
-    }
-    if alrm.contains(Alrm701::CabinetOpen) {
-        flags.push("CABINET_OPEN".to_string());
-    }
-    if alrm.contains(Alrm701::ManualShutdown) {
-        flags.push("MANUAL_SHUTDOWN".to_string());
-    }
-    if alrm.contains(Alrm701::OverTemp) {
-        flags.push("OVER_TEMP".to_string());
-    }
-    if alrm.contains(Alrm701::OverFrequency) {
-        flags.push("OVER_FREQUENCY".to_string());
-    }
-    if alrm.contains(Alrm701::UnderFrequency) {
-        flags.push("UNDER_FREQUENCY".to_string());
-    }
-    if alrm.contains(Alrm701::AcOverVolt) {
-        flags.push("AC_OVER_VOLT".to_string());
-    }
-    if alrm.contains(Alrm701::AcUnderVolt) {
-        flags.push("AC_UNDER_VOLT".to_string());
-    }
-    if alrm.contains(Alrm701::BlownStringFuse) {
-        flags.push("BLOWN_STRING_FUSE".to_string());
-    }
-    if alrm.contains(Alrm701::UnderTemp) {
-        flags.push("UNDER_TEMP".to_string());
-    }
-    if alrm.contains(Alrm701::MemoryLoss) {
-        flags.push("MEMORY_LOSS".to_string());
-    }
-    if alrm.contains(Alrm701::HwTestFailure) {
-        flags.push("HW_TEST_FAILURE".to_string());
-    }
-    if alrm.contains(Alrm701::ManufacturerAlrm) {
-        flags.push("MANUFACTURER_ALRM".to_string());
-    }
-
-    if flags.is_empty() { None } else { Some(flags) }
+    crate::map_sunspec_flags!(
+        alrm,
+        Alrm701,
+        [
+            GroundFault => "GROUND_FAULT",
+            DcOverVolt => "DC_OVER_VOLT",
+            AcDisconnect => "AC_DISCONNECT",
+            DcDisconnect => "DC_DISCONNECT",
+            GridDisconnect => "GRID_DISCONNECT",
+            CabinetOpen => "CABINET_OPEN",
+            ManualShutdown => "MANUAL_SHUTDOWN",
+            OverTemp => "OVER_TEMP",
+            OverFrequency => "OVER_FREQUENCY",
+            UnderFrequency => "UNDER_FREQUENCY",
+            AcOverVolt => "AC_OVER_VOLT",
+            AcUnderVolt => "AC_UNDER_VOLT",
+            BlownStringFuse => "BLOWN_STRING_FUSE",
+            UnderTemp => "UNDER_TEMP",
+            MemoryLoss => "MEMORY_LOSS",
+            HwTestFailure => "HW_TEST_FAILURE",
+            ManufacturerAlrm => "MANUFACTURER_ALRM",
+        ]
+    )
 }
 
 fn map_der_mode(mode: DerMode701) -> Option<Vec<String>> {
-    let mut flags = Vec::new();
-    if mode.contains(DerMode701::GridFollowing) {
-        flags.push("GRID_FOLLOWING".to_string());
-    }
-    if mode.contains(DerMode701::GridForming) {
-        flags.push("GRID_FORMING".to_string());
-    }
-    if mode.contains(DerMode701::PvClipped) {
-        flags.push("PV_CLIPPED".to_string());
-    }
-    if flags.is_empty() { None } else { Some(flags) }
+    crate::map_sunspec_flags!(
+        mode,
+        DerMode701,
+        [
+            GridFollowing => "GRID_FOLLOWING",
+            GridForming => "GRID_FORMING",
+            PvClipped => "PV_CLIPPED",
+        ]
+    )
 }
 
 fn map_throt_src(src: ThrotSrc701) -> Option<Vec<String>> {
-    let mut flags = Vec::new();
-    if src.contains(ThrotSrc701::MaxW) {
-        flags.push("MAX_W".to_string());
-    }
-    if src.contains(ThrotSrc701::FixedW) {
-        flags.push("FIXED_W".to_string());
-    }
-    if src.contains(ThrotSrc701::FixedVar) {
-        flags.push("FIXED_VAR".to_string());
-    }
-    if src.contains(ThrotSrc701::FixedPf) {
-        flags.push("FIXED_PF".to_string());
-    }
-    if src.contains(ThrotSrc701::VoltVar) {
-        flags.push("VOLT_VAR".to_string());
-    }
-    if src.contains(ThrotSrc701::FreqWatt) {
-        flags.push("FREQ_WATT".to_string());
-    }
-    if src.contains(ThrotSrc701::DynReactCurr) {
-        flags.push("DYN_REACT_CURR".to_string());
-    }
-    if src.contains(ThrotSrc701::Lvrt) {
-        flags.push("LVRT".to_string());
-    }
-    if src.contains(ThrotSrc701::Hvrt) {
-        flags.push("HVRT".to_string());
-    }
-    if src.contains(ThrotSrc701::WattVar) {
-        flags.push("WATT_VAR".to_string());
-    }
-    if src.contains(ThrotSrc701::VoltWatt) {
-        flags.push("VOLT_WATT".to_string());
-    }
-    if src.contains(ThrotSrc701::Scheduled) {
-        flags.push("SCHEDULED".to_string());
-    }
-    if src.contains(ThrotSrc701::Lfrt) {
-        flags.push("LFRT".to_string());
-    }
-    if src.contains(ThrotSrc701::Hfrt) {
-        flags.push("HFRT".to_string());
-    }
-    if src.contains(ThrotSrc701::Derated) {
-        flags.push("DERATED".to_string());
-    }
-    if flags.is_empty() { None } else { Some(flags) }
+    crate::map_sunspec_flags!(
+        src,
+        ThrotSrc701,
+        [
+            MaxW => "MAX_W",
+            FixedW => "FIXED_W",
+            FixedVar => "FIXED_VAR",
+            FixedPf => "FIXED_PF",
+            VoltVar => "VOLT_VAR",
+            FreqWatt => "FREQ_WATT",
+            DynReactCurr => "DYN_REACT_CURR",
+            Lvrt => "LVRT",
+            Hvrt => "HVRT",
+            WattVar => "WATT_VAR",
+            VoltWatt => "VOLT_WATT",
+            Scheduled => "SCHEDULED",
+            Lfrt => "LFRT",
+            Hfrt => "HFRT",
+            Derated => "DERATED",
+        ]
+    )
 }
 
 impl SunSpecModel for Model701 {

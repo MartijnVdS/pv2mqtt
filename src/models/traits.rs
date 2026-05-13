@@ -32,3 +32,18 @@ macro_rules! impl_to_status_string_for_st {
         }
     };
 }
+
+#[macro_export]
+macro_rules! map_sunspec_flags {
+    ($val:expr, $type:ty, [ $($variant:ident => $string:expr),* $(,)? ]) => {
+        {
+            let mut flags = Vec::new();
+            $(
+                if $val.contains(<$type>::$variant) {
+                    flags.push($string.to_string());
+                }
+            )*
+            if flags.is_empty() { None } else { Some(flags) }
+        }
+    };
+}
