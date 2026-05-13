@@ -7,7 +7,7 @@ use sunspec::models::model701::{
 };
 
 impl ToStatusString for sunspec::models::model701::InvSt {
-    fn to_status_string(&self) -> String {
+    fn to_status_string(&self) -> &'static str {
         match self {
             Self::Off => "OFF",
             Self::Sleeping => "SLEEPING",
@@ -19,22 +19,20 @@ impl ToStatusString for sunspec::models::model701::InvSt {
             Self::Standby => "STANDBY",
             _ => "UNKNOWN",
         }
-        .to_string()
     }
 }
 
 impl ToStatusString for sunspec::models::model701::ConnSt {
-    fn to_status_string(&self) -> String {
+    fn to_status_string(&self) -> &'static str {
         match self {
             Self::Disconnected => "DISCONNECTED",
             Self::Connected => "CONNECTED",
             _ => "UNKNOWN",
         }
-        .to_string()
     }
 }
 
-fn map_alrm(alrm: Alrm701) -> Option<Vec<String>> {
+fn map_alrm(alrm: Alrm701) -> Option<Vec<&'static str>> {
     crate::map_sunspec_flags!(
         alrm,
         Alrm701,
@@ -60,7 +58,7 @@ fn map_alrm(alrm: Alrm701) -> Option<Vec<String>> {
     )
 }
 
-fn map_der_mode(mode: DerMode701) -> Option<Vec<String>> {
+fn map_der_mode(mode: DerMode701) -> Option<Vec<&'static str>> {
     crate::map_sunspec_flags!(
         mode,
         DerMode701,
@@ -72,7 +70,7 @@ fn map_der_mode(mode: DerMode701) -> Option<Vec<String>> {
     )
 }
 
-fn map_throt_src(src: ThrotSrc701) -> Option<Vec<String>> {
+fn map_throt_src(src: ThrotSrc701) -> Option<Vec<&'static str>> {
     crate::map_sunspec_flags!(
         src,
         ThrotSrc701,
@@ -114,7 +112,7 @@ impl SunSpecModel for Model701 {
             .inv_st
             .as_ref()
             .map(|s| s.to_status_string())
-            .unwrap_or_else(|| "UNKNOWN".to_string());
+            .unwrap_or("UNKNOWN");
         data.tmp_cab = apply_sf(self.tmp_cab, self.tmp_sf);
         data.tmp_snk = apply_sf(self.tmp_snk, self.tmp_sf);
         data.tmp_trns = apply_sf(self.tmp_trns, self.tmp_sf);
@@ -144,7 +142,7 @@ impl SunSpecModel for Model701 {
             if cleaned.is_empty() {
                 None
             } else {
-                Some(cleaned)
+                Some(std::borrow::Cow::Owned(cleaned))
             }
         });
     }
@@ -255,10 +253,10 @@ mod tests {
         assert_relative_eq!(data.w, 5000.0);
         assert_eq!(data.st, "RUNNING");
         assert_eq!(data.conn_st, Some(true));
-        assert_eq!(data.mn_alrm_info, Some("Test Alarm".to_string()));
+        assert_eq!(data.mn_alrm_info.as_deref(), Some("Test Alarm"));
         assert_relative_eq!(data.throt_pct.unwrap(), 50.0);
         let alrms = data.alrm.unwrap();
-        assert!(alrms.contains(&"GROUND_FAULT".to_string()));
-        assert!(alrms.contains(&"DC_OVER_VOLT".to_string()));
+        assert!(alrms.contains(&"GROUND_FAULT"));
+        assert!(alrms.contains(&"DC_OVER_VOLT"));
     }
 }

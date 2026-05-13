@@ -42,7 +42,7 @@ pub struct NameplateData {
     pub var_max_abs: Option<f32>,
 }
 
-#[derive(Debug, Serialize, Default, Clone)]
+#[derive(Debug, Serialize, Clone)]
 pub struct InverterData {
     pub timestamp: DateTime<Utc>,
     #[serde(rename = "AphA")]
@@ -82,21 +82,55 @@ pub struct InverterData {
     #[serde(rename = "TmpSw", skip_serializing_if = "Option::is_none")]
     pub tmp_sw: Option<f32>,
     #[serde(rename = "Alrm", skip_serializing_if = "Option::is_none")]
-    pub alrm: Option<Vec<String>>,
+    pub alrm: Option<Vec<&'static str>>,
     #[serde(rename = "MnAlrmInfo", skip_serializing_if = "Option::is_none")]
-    pub mn_alrm_info: Option<String>,
+    pub mn_alrm_info: Option<std::borrow::Cow<'static, str>>,
     #[serde(rename = "DERMode", skip_serializing_if = "Option::is_none")]
-    pub der_mode: Option<Vec<String>>,
+    pub der_mode: Option<Vec<&'static str>>,
     #[serde(rename = "ConnSt", skip_serializing_if = "Option::is_none")]
     pub conn_st: Option<bool>,
     #[serde(rename = "ThrotPct", skip_serializing_if = "Option::is_none")]
     pub throt_pct: Option<f32>,
     #[serde(rename = "ThrotSrc", skip_serializing_if = "Option::is_none")]
-    pub throt_src: Option<Vec<String>>,
+    pub throt_src: Option<Vec<&'static str>>,
     #[serde(rename = "St")]
-    pub st: String,
+    pub st: &'static str,
     #[serde(rename = "Controls", skip_serializing_if = "Option::is_none")]
     pub controls: Option<ControlData>,
+}
+
+impl Default for InverterData {
+    fn default() -> Self {
+        Self {
+            timestamp: Utc::now(),
+            aph_a: None,
+            aph_b: None,
+            aph_c: None,
+            v_an: None,
+            v_bn: None,
+            v_cn: None,
+            w: 0.0,
+            va: None,
+            v_ar: None,
+            wh: 0.0,
+            pf: None,
+            hz: 0.0,
+            tmp_cab: None,
+            tmp_snk: None,
+            tmp_trns: None,
+            tmp_ot: None,
+            tmp_amb: None,
+            tmp_sw: None,
+            alrm: None,
+            mn_alrm_info: None,
+            der_mode: None,
+            conn_st: None,
+            throt_pct: None,
+            throt_src: None,
+            st: "OFF",
+            controls: None,
+        }
+    }
 }
 
 pub trait NumericValue {
@@ -222,7 +256,7 @@ mod tests {
         data.timestamp = now;
         data.w = 1000.0;
         data.wh = 5000.0;
-        data.st = "MPPT".to_string();
+        data.st = "MPPT";
         data.v_an = None;
 
         let json = serde_json::to_string(&data).unwrap();

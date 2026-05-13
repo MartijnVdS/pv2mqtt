@@ -1,6 +1,6 @@
 [package]
 name = "pv2mqtt"
-version = "1.5.1"
+version = "1.5.2"
 edition = "2024"
 
 [lints.rust]
@@ -52,6 +52,7 @@ lto = true
 codegen-units = 1
 strip = "debuginfo"
 opt-level = "z"
+# panic = "abort"
 
 [dev-dependencies]
 approx = "0.5"

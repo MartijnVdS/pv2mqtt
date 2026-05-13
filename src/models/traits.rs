@@ -8,14 +8,14 @@ pub trait SunSpecModel {
 }
 
 pub trait ToStatusString {
-    fn to_status_string(&self) -> String;
+    fn to_status_string(&self) -> &'static str;
 }
 
 #[macro_export]
 macro_rules! impl_to_status_string_for_st {
     ($t:ty, $off:ident, $sleeping:ident, $starting:ident, $mppt:ident, $throttled:ident, $shutting:ident, $fault:ident, $standby:ident) => {
         impl $crate::models::traits::ToStatusString for $t {
-            fn to_status_string(&self) -> String {
+            fn to_status_string(&self) -> &'static str {
                 match self {
                     Self::$off => "OFF",
                     Self::$sleeping => "SLEEPING",
@@ -27,7 +27,6 @@ macro_rules! impl_to_status_string_for_st {
                     Self::$standby => "STANDBY",
                     _ => "UNKNOWN",
                 }
-                .to_string()
             }
         }
     };
@@ -40,7 +39,7 @@ macro_rules! map_sunspec_flags {
             let mut flags = Vec::new();
             $(
                 if $val.contains(<$type>::$variant) {
-                    flags.push($string.to_string());
+                    flags.push($string);
                 }
             )*
             if flags.is_empty() { None } else { Some(flags) }
