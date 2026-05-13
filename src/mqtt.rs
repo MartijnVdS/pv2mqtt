@@ -116,20 +116,25 @@ fn handle_incoming_publish(
     };
 
     // Expected topic: {prefix}/inverter/{serial}/set/{register}
-    let mut parts = topic.split('/');
-    let (Some(p0), Some(p1), Some(serial_part), Some(p3), Some(register)) = (
-        parts.next(),
-        parts.next(),
-        parts.next(),
-        parts.next(),
-        parts.next(),
-    ) else {
-        warn!("Received message for an unknown MQTT topic");
+    if !topic.starts_with(topic_prefix) {
+        return;
+    }
+
+    let rest = &topic[topic_prefix.len()..];
+    if !rest.starts_with("/inverter/") {
+        return;
+    }
+
+    let mut parts = rest[10..].split('/'); // skip "/inverter/"
+    let (Some(serial_part), Some(p_set), Some(register)) =
+        (parts.next(), parts.next(), parts.next())
+    else {
+        warn!("Received message for an unknown MQTT topic: {}", topic);
         return;
     };
 
-    if p0 != topic_prefix || p1 != "inverter" || p3 != "set" || parts.next().is_some() {
-        warn!("Received message for an unknown or malformed MQTT topic");
+    if p_set != "set" || parts.next().is_some() {
+        warn!("Received message for an unknown or malformed MQTT topic: {}", topic);
         return;
     }
 
@@ -361,5 +366,52 @@ mod tests {
 
         // But we should at least check if the masked_url is correct.
         assert_eq!(task.config.masked_url(), "mqtts://localhost:8883");
+    }
+
+    #[test]
+    fn test_handle_incoming_publish_multilevel_prefix() {
+        let (cmd_tx, mut cmd_rx) = tokio::sync::broadcast::channel(1);
+        let prefix = "home/solar";
+
+        // 1. Valid multi-level prefix
+        let p = rumqttc::Publish {
+            topic: "home/solar/inverter/SN123/set/WMaxLimPct".into(),
+            payload: "75.5".into(),
+            dup: false,
+            retain: false,
+            qos: QoS::AtLeastOnce,
+            pkid: 0,
+            properties: None,
+        };
+        handle_incoming_publish(&p, &cmd_tx, prefix);
+        let cmd = cmd_rx.try_recv().expect("Should have received a command");
+        assert_eq!(cmd.serial, "SN123");
+        assert!(matches!(cmd.action, ControlAction::WMaxLimPct(val) if val == 75.5));
+
+        // 2. Invalid prefix
+        let p = rumqttc::Publish {
+            topic: "other/solar/inverter/SN123/set/WMaxLimPct".into(),
+            payload: "75.5".into(),
+            dup: false,
+            retain: false,
+            qos: QoS::AtLeastOnce,
+            pkid: 0,
+            properties: None,
+        };
+        handle_incoming_publish(&p, &cmd_tx, prefix);
+        assert!(cmd_rx.try_recv().is_err());
+
+        // 3. Malformed path
+        let p = rumqttc::Publish {
+            topic: "home/solar/inverter/SN123/something/WMaxLimPct".into(),
+            payload: "75.5".into(),
+            dup: false,
+            retain: false,
+            qos: QoS::AtLeastOnce,
+            pkid: 0,
+            properties: None,
+        };
+        handle_incoming_publish(&p, &cmd_tx, prefix);
+        assert!(cmd_rx.try_recv().is_err());
     }
 }

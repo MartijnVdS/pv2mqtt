@@ -188,7 +188,7 @@ impl HomeAssistantIntegration {
                 (
                     "WMaxLimPct",
                     "number",
-                    Some("power_factor"),
+                    None,
                     None,
                     "Active Power Limit",
                     format!("{}/inverter/{}/set/WMaxLimPct", self.topic_prefix, serial),
@@ -699,5 +699,29 @@ mod tests {
 
         // Check unique_id format
         assert_eq!(cmps["W"]["unique_id"], "solar_SN123_W");
+    }
+
+    #[test]
+    fn test_wmaxlimpct_no_device_class() {
+        let ha = HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string());
+        let msgs = ha.generate_discovery_messages(
+            "SN123",
+            "Brand",
+            "ModelX",
+            Some("v1.0"),
+            Some(101),
+            crate::models::ActiveControlModel::Model704 { base_addr: 40000 },
+        );
+
+        let modern_msg = &msgs[0];
+        let MqttMessage::Publish { payload, .. } = modern_msg;
+        let body: serde_json::Value = serde_json::from_slice(payload).unwrap();
+        let cmps = body["cmps"].as_object().unwrap();
+
+        let wmaxlimpct = &cmps["WMaxLimPct"];
+        assert!(
+            wmaxlimpct.get("device_class").is_none(),
+            "WMaxLimPct should not have a device_class"
+        );
     }
 }

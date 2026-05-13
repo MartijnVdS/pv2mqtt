@@ -1,6 +1,6 @@
 use super::{ConnectionTask, DeviceState, POLL_TIMEOUT_SECS};
 use crate::error::{ModbusError, Pv2MqttError, Result};
-use crate::models::{ActiveControlModel, SUPPORTED_MODELS};
+use crate::models::{ActiveControlModel, SUPPORTED_INVERTER_DATA_MODELS};
 use std::sync::Arc;
 use std::time::Duration;
 use sunspec::client::AsyncClient;
@@ -114,7 +114,7 @@ impl ConnectionTask {
 
         // Fallback to default priority list if no preference or preference was unavailable
         if selected_model.is_none() {
-            selected_model = SUPPORTED_MODELS
+            selected_model = SUPPORTED_INVERTER_DATA_MODELS
                 .iter()
                 .find(|&&id| available_models.contains(&id))
                 .copied();
@@ -267,11 +267,12 @@ impl ConnectionTask {
             {
                 Ok(Ok(m702)) => {
                     debug!("Read Model 702 nameplate for unit {}", unit_id);
+                    use crate::models::apply_sf_opt;
                     nameplate = Some(crate::models::NameplateData {
-                        w_max: m702.w_max_rtg.map(|v| v as f32),
-                        va_max: m702.va_max_rtg.map(|v| v as f32),
-                        var_max_inj: m702.var_max_inj_rtg.map(|v| v as f32),
-                        var_max_abs: m702.var_max_abs_rtg.map(|v| v as f32),
+                        w_max: apply_sf_opt(m702.w_max_rtg, m702.w_sf.unwrap_or(0)),
+                        va_max: apply_sf_opt(m702.va_max_rtg, m702.va_sf.unwrap_or(0)),
+                        var_max_inj: apply_sf_opt(m702.var_max_inj_rtg, m702.var_sf.unwrap_or(0)),
+                        var_max_abs: apply_sf_opt(m702.var_max_abs_rtg, m702.var_sf.unwrap_or(0)),
                     })
                 }
                 Ok(Err(e)) => warn!("Failed to read Model 702 for unit {}: {}", unit_id, e),

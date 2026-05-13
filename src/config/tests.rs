@@ -118,6 +118,26 @@ fn test_invalid_tcp_address() {
         key_path: Option::None,
     };
     assert!(config.validate().is_ok());
+
+    // Should pass with IPv6 address
+    config.connections[0].modbus = ModbusConfig::Tcp {
+        address: "[::1]:502".to_string(),
+        tls: false,
+        ca_path: None,
+        cert_path: None,
+        key_path: None,
+    };
+    assert!(config.validate().is_ok());
+
+    // Should fail with invalid IPv6 (missing port)
+    config.connections[0].modbus = ModbusConfig::Tcp {
+        address: "::1".to_string(),
+        tls: false,
+        ca_path: None,
+        cert_path: None,
+        key_path: None,
+    };
+    assert!(config.validate().is_err());
 }
 
 #[test]

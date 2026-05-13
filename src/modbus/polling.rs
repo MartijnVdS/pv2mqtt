@@ -151,7 +151,7 @@ impl ConnectionTask {
         let addr = device.models.m1.addr;
         let mut ctx = device.client.lock().await;
         ctx.set_slave(Slave(device.slave_id));
-        let regs_res = tokio::time::timeout(
+        let _regs = tokio::time::timeout(
             Duration::from_secs(READ_TIMEOUT_SECS),
             ctx.read_holding_registers(addr, 2),
         )
@@ -159,8 +159,6 @@ impl ConnectionTask {
         .map_err(|_| {
             Pv2MqttError::Internal(format!("Keep-alive timeout for unit {}", device.slave_id))
         })??;
-
-        let _ = regs_res.map_err(|e| Pv2MqttError::Internal(format!("Keep-alive error: {}", e)))?;
 
         Ok(())
     }

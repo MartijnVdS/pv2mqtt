@@ -14,7 +14,6 @@ use crate::config::Config;
 use crate::error::{Pv2MqttError, Result};
 use crate::taskmanager::TaskManager;
 use tracing::{error, info};
-use tracing_subscriber::EnvFilter;
 
 pub fn get_config_path() -> Result<String> {
     let args: Vec<String> = std::env::args().collect();
@@ -30,18 +29,6 @@ pub fn get_config_path() -> Result<String> {
 }
 
 pub async fn run() -> Result<()> {
-    // Initialize logging
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env().add_directive(tracing::Level::INFO.into()))
-        .init();
-
-    // Install default crypto provider for rustls
-    rustls::crypto::aws_lc_rs::default_provider()
-        .install_default()
-        .ok();
-
-    info!("Starting pv2mqtt");
-
     // Load native certificates
     let root_cert_store = tls::load_native_certs().await?;
 
@@ -50,17 +37,17 @@ pub async fn run() -> Result<()> {
 
     // Load configuration
     let config = match Config::load(&config_path) {
-        Ok(c) => {
+        Ok(cfg) => {
             info!("Configuration loaded successfully");
             info!(
                 "Home Assistant Autodiscovery: {}",
-                if c.mqtt.ha_enabled {
+                if cfg.mqtt.ha_enabled {
                     "Enabled"
                 } else {
                     "Disabled"
                 }
             );
-            c
+            cfg
         }
         Err(e) => {
             error!("Failed to load configuration: {}", e);

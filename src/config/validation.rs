@@ -92,25 +92,39 @@ impl ConnectionConfig {
             ModbusConfig::Tcp { address, .. } => {
                 if address.parse::<SocketAddr>().is_err() {
                     // If it's not a direct SocketAddr, check if it's a valid host:port
-                    let parts: Vec<&str> = address.split(':').collect();
-                    if parts.len() != 2 {
+                    if let Some(colon_idx) = address.rfind(':') {
+                        let host = &address[..colon_idx];
+                        let port_str = &address[colon_idx + 1..];
+
+                        if host.is_empty() {
+                            return Err(Pv2MqttError::Config(format!(
+                                "Host part of address '{}' cannot be empty in connection '{}'",
+                                address, self.name
+                            )));
+                        }
+
+                        // Heuristic: If there's more than one colon, it's likely an IPv6 address.
+                        // IPv6 addresses with ports MUST be bracketed in this config format
+                        // to avoid ambiguity (e.g. [::1]:502).
+                        if host.contains(':') && !host.starts_with('[') {
+                            return Err(Pv2MqttError::Config(format!(
+                                "Ambiguous TCP address '{}' in connection '{}'. IPv6 addresses with ports must be bracketed, e.g., '[::1]:502'.",
+                                address, self.name
+                            )));
+                        }
+
+                        port_str.parse::<u16>().map_err(|e| {
+                            Pv2MqttError::Config(format!(
+                                "Invalid port in TCP address '{}' in connection '{}': {}",
+                                address, self.name, e
+                            ))
+                        })?;
+                    } else {
                         return Err(Pv2MqttError::Config(format!(
-                            "Invalid TCP address '{}' in connection '{}'. Expected 'hostname:port' or 'ip:port'.",
+                            "Invalid TCP address '{}' in connection '{}'. Expected 'hostname:port' or '[ipv6]:port'.",
                             address, self.name
                         )));
                     }
-                    if parts[0].is_empty() {
-                        return Err(Pv2MqttError::Config(format!(
-                            "Host part of address '{}' cannot be empty in connection '{}'",
-                            address, self.name
-                        )));
-                    }
-                    parts[1].parse::<u16>().map_err(|e| {
-                        Pv2MqttError::Config(format!(
-                            "Invalid port in TCP address '{}' in connection '{}': {}",
-                            address, self.name, e
-                        ))
-                    })?;
                 }
             }
             ModbusConfig::Rtu {
