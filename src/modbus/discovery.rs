@@ -267,12 +267,12 @@ impl ConnectionTask {
             {
                 Ok(Ok(m702)) => {
                     debug!("Read Model 702 nameplate for unit {}", unit_id);
-                    use crate::models::apply_sf_opt;
+                    use crate::models::apply_sf;
                     nameplate = Some(crate::models::NameplateData {
-                        w_max: apply_sf_opt(m702.w_max_rtg, m702.w_sf.unwrap_or(0)),
-                        va_max: apply_sf_opt(m702.va_max_rtg, m702.va_sf.unwrap_or(0)),
-                        var_max_inj: apply_sf_opt(m702.var_max_inj_rtg, m702.var_sf.unwrap_or(0)),
-                        var_max_abs: apply_sf_opt(m702.var_max_abs_rtg, m702.var_sf.unwrap_or(0)),
+                        w_max: apply_sf(m702.w_max_rtg, m702.w_sf.unwrap_or(0)),
+                        va_max: apply_sf(m702.va_max_rtg, m702.va_sf.unwrap_or(0)),
+                        var_max_inj: apply_sf(m702.var_max_inj_rtg, m702.var_sf.unwrap_or(0)),
+                        var_max_abs: apply_sf(m702.var_max_abs_rtg, m702.var_sf.unwrap_or(0)),
                     })
                 }
                 Ok(Err(e)) => warn!("Failed to read Model 702 for unit {}: {}", unit_id, e),

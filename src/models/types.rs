@@ -99,71 +99,82 @@ pub struct InverterData {
     pub controls: Option<ControlData>,
 }
 
-pub fn apply_sf(val: u16, sf: i16) -> Option<f32> {
-    if val == SUNSPEC_UNIMPLEMENTED_U16 {
-        return None;
-    }
-    Some(val as f32 * 10f32.powi(sf as i32))
+pub trait NumericValue {
+    fn to_f64(self) -> Option<f64>;
 }
 
-pub fn apply_sf_i16(val: i16, sf: i16) -> Option<f32> {
-    if val == SUNSPEC_UNIMPLEMENTED_I16 {
-        return None;
-    }
-    Some(val as f32 * 10f32.powi(sf as i32))
-}
-
-pub fn apply_sf_u32(val: u32, sf: i16) -> Option<f32> {
-    if val == SUNSPEC_UNIMPLEMENTED_U32 {
-        return None;
-    }
-    Some(val as f32 * 10f32.powi(sf as i32))
-}
-
-pub fn apply_sf_u64_f64(val: u64, sf: i16) -> Option<f64> {
-    if val == SUNSPEC_UNIMPLEMENTED_U64 {
-        return None;
-    }
-    Some(val as f64 * 10f64.powi(sf as i32))
-}
-
-pub fn apply_sf_u32_f64(val: u32, sf: i16) -> Option<f64> {
-    if val == SUNSPEC_UNIMPLEMENTED_U32 {
-        return None;
-    }
-    Some(val as f64 * 10f64.powi(sf as i32))
-}
-
-pub fn apply_sf_u32_opt(val: Option<u32>, sf: Option<i16>) -> Option<f32> {
-    match (val, sf) {
-        (Some(v), Some(s)) => apply_sf_u32(v, s),
-        _ => None,
+impl NumericValue for u16 {
+    fn to_f64(self) -> Option<f64> {
+        if self == SUNSPEC_UNIMPLEMENTED_U16 {
+            None
+        } else {
+            Some(self as f64)
+        }
     }
 }
 
-pub fn apply_sf_u64_f64_opt(val: Option<u64>, sf: Option<i16>) -> Option<f64> {
-    match (val, sf) {
-        (Some(v), Some(s)) => apply_sf_u64_f64(v, s),
-        _ => None,
+impl NumericValue for i16 {
+    fn to_f64(self) -> Option<f64> {
+        if self == SUNSPEC_UNIMPLEMENTED_I16 {
+            None
+        } else {
+            Some(self as f64)
+        }
     }
 }
 
-pub fn apply_sf_u16_sf_opt(val: Option<u16>, sf: Option<i16>) -> Option<f32> {
-    match (val, sf) {
-        (Some(v), Some(s)) => apply_sf(v, s),
-        _ => None,
+impl NumericValue for u32 {
+    fn to_f64(self) -> Option<f64> {
+        if self == SUNSPEC_UNIMPLEMENTED_U32 {
+            None
+        } else {
+            Some(self as f64)
+        }
     }
 }
 
-pub fn apply_sf_i16_opt(val: Option<i16>, sf: Option<i16>) -> Option<f32> {
-    match (val, sf) {
-        (Some(v), Some(s)) => apply_sf_i16(v, s),
-        _ => None,
+impl NumericValue for u64 {
+    fn to_f64(self) -> Option<f64> {
+        if self == SUNSPEC_UNIMPLEMENTED_U64 {
+            None
+        } else {
+            Some(self as f64)
+        }
     }
 }
 
-pub fn apply_sf_opt(val: Option<u16>, sf: i16) -> Option<f32> {
-    val.and_then(|v| apply_sf(v, sf))
+impl<T: NumericValue> NumericValue for Option<T> {
+    fn to_f64(self) -> Option<f64> {
+        self.and_then(|v| v.to_f64())
+    }
+}
+
+pub trait ScaleFactor {
+    fn to_i32(self) -> Option<i32>;
+}
+
+impl ScaleFactor for i16 {
+    fn to_i32(self) -> Option<i32> {
+        Some(self as i32)
+    }
+}
+
+impl ScaleFactor for Option<i16> {
+    fn to_i32(self) -> Option<i32> {
+        self.map(|s| s as i32)
+    }
+}
+
+/// Applies a SunSpec scale factor to a numeric value, returning an f32.
+pub fn apply_sf<V: NumericValue, S: ScaleFactor>(val: V, sf: S) -> Option<f32> {
+    apply_sf_f64(val, sf).map(|v| v as f32)
+}
+
+/// Applies a SunSpec scale factor to a numeric value, returning an f64.
+pub fn apply_sf_f64<V: NumericValue, S: ScaleFactor>(val: V, sf: S) -> Option<f64> {
+    let v = val.to_f64()?;
+    let s = sf.to_i32()?;
+    Some(v * 10f64.powi(s))
 }
 
 #[cfg(test)]
@@ -174,37 +185,34 @@ mod tests {
 
     #[test]
     fn test_apply_sf() {
-        assert_relative_eq!(apply_sf(100, 0).unwrap(), 100.0);
-        assert_relative_eq!(apply_sf(100, -1).unwrap(), 10.0);
-        assert_relative_eq!(apply_sf(100, 1).unwrap(), 1000.0);
-        assert_eq!(apply_sf(SUNSPEC_UNIMPLEMENTED_U16, -1), None);
+        assert_relative_eq!(apply_sf(100u16, 0i16).unwrap(), 100.0);
+        assert_relative_eq!(apply_sf(100u16, -1i16).unwrap(), 10.0);
+        assert_relative_eq!(apply_sf(100u16, 1i16).unwrap(), 1000.0);
+        assert_eq!(apply_sf(SUNSPEC_UNIMPLEMENTED_U16, -1i16), None);
     }
 
     #[test]
     fn test_apply_sf_i16() {
-        assert_relative_eq!(apply_sf_i16(100, 0).unwrap(), 100.0);
-        assert_relative_eq!(apply_sf_i16(-100, -1).unwrap(), -10.0);
-        assert_eq!(apply_sf_i16(SUNSPEC_UNIMPLEMENTED_I16, -1), None);
+        assert_relative_eq!(apply_sf(100i16, 0i16).unwrap(), 100.0);
+        assert_relative_eq!(apply_sf(-100i16, -1i16).unwrap(), -10.0);
+        assert_eq!(apply_sf(SUNSPEC_UNIMPLEMENTED_I16, -1i16), None);
     }
 
     #[test]
     fn test_apply_sf_i16_opt() {
-        assert_relative_eq!(apply_sf_i16_opt(Some(100), Some(0)).unwrap(), 100.0);
-        assert_relative_eq!(apply_sf_i16_opt(Some(100), Some(-1)).unwrap(), 10.0);
-        assert_eq!(apply_sf_i16_opt(None, Some(-1)), None);
-        assert_eq!(apply_sf_i16_opt(Some(100), None), None);
-        assert_eq!(apply_sf_i16_opt(None, None), None);
-        assert_eq!(
-            apply_sf_i16_opt(Some(SUNSPEC_UNIMPLEMENTED_I16), Some(-1)),
-            None
-        );
+        assert_relative_eq!(apply_sf(Some(100i16), Some(0i16)).unwrap(), 100.0);
+        assert_relative_eq!(apply_sf(Some(100i16), Some(-1i16)).unwrap(), 10.0);
+        assert_eq!(apply_sf(None::<i16>, Some(-1i16)), None);
+        assert_eq!(apply_sf(Some(100i16), None::<i16>), None);
+        assert_eq!(apply_sf(None::<i16>, None::<i16>), None);
+        assert_eq!(apply_sf(Some(SUNSPEC_UNIMPLEMENTED_I16), Some(-1i16)), None);
     }
 
     #[test]
     fn test_apply_sf_u32_f64() {
-        assert_relative_eq!(apply_sf_u32_f64(100000, 0).unwrap(), 100000.0);
-        assert_relative_eq!(apply_sf_u32_f64(123456, -2).unwrap(), 1234.56);
-        assert_eq!(apply_sf_u32_f64(SUNSPEC_UNIMPLEMENTED_U32, -2), None);
+        assert_relative_eq!(apply_sf_f64(100000u32, 0i16).unwrap(), 100000.0);
+        assert_relative_eq!(apply_sf_f64(123456u32, -2i16).unwrap(), 1234.56);
+        assert_eq!(apply_sf_f64(SUNSPEC_UNIMPLEMENTED_U32, -2i16), None);
     }
 
     #[test]

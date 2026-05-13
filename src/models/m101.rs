@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::traits::{SunSpecModel, ToStatusString};
-use super::types::{
-    InverterData, apply_sf, apply_sf_i16, apply_sf_i16_opt, apply_sf_opt, apply_sf_u32_f64,
-};
+use super::types::{InverterData, apply_sf, apply_sf_f64};
 use crate::impl_to_status_string_for_st;
 use sunspec::models::model101::Model101;
 
@@ -22,22 +20,22 @@ impl_to_status_string_for_st!(
 impl SunSpecModel for Model101 {
     fn into_inverter_data(self, data: &mut InverterData) {
         data.aph_a = apply_sf(self.aph_a, self.a_sf);
-        data.aph_b = apply_sf_opt(self.aph_b, self.a_sf);
-        data.aph_c = apply_sf_opt(self.aph_c, self.a_sf);
+        data.aph_b = apply_sf(self.aph_b, self.a_sf);
+        data.aph_c = apply_sf(self.aph_c, self.a_sf);
         data.v_an = apply_sf(self.ph_vph_a, self.v_sf);
-        data.v_bn = apply_sf_opt(self.ph_vph_b, self.v_sf);
-        data.v_cn = apply_sf_opt(self.ph_vph_c, self.v_sf);
-        data.w = apply_sf_i16(self.w, self.w_sf).unwrap_or(0.0);
-        data.va = apply_sf_i16_opt(self.va, self.va_sf);
-        data.v_ar = apply_sf_i16_opt(self.v_ar, self.v_ar_sf);
-        data.wh = apply_sf_u32_f64(self.wh, self.wh_sf).unwrap_or(0.0);
-        data.pf = apply_sf_i16_opt(self.pf, self.pf_sf);
+        data.v_bn = apply_sf(self.ph_vph_b, self.v_sf);
+        data.v_cn = apply_sf(self.ph_vph_c, self.v_sf);
+        data.w = apply_sf(self.w, self.w_sf).unwrap_or(0.0);
+        data.va = apply_sf(self.va, self.va_sf);
+        data.v_ar = apply_sf(self.v_ar, self.v_ar_sf);
+        data.wh = apply_sf_f64(self.wh, self.wh_sf).unwrap_or(0.0);
+        data.pf = apply_sf(self.pf, self.pf_sf);
         data.hz = apply_sf(self.hz, self.hz_sf).unwrap_or(0.0);
         data.st = self.st.to_status_string();
-        data.tmp_cab = apply_sf_i16(self.tmp_cab, self.tmp_sf);
-        data.tmp_snk = apply_sf_i16_opt(self.tmp_snk, Some(self.tmp_sf));
-        data.tmp_trns = apply_sf_i16_opt(self.tmp_trns, Some(self.tmp_sf));
-        data.tmp_ot = apply_sf_i16_opt(self.tmp_ot, Some(self.tmp_sf));
+        data.tmp_cab = apply_sf(self.tmp_cab, self.tmp_sf);
+        data.tmp_snk = apply_sf(self.tmp_snk, self.tmp_sf);
+        data.tmp_trns = apply_sf(self.tmp_trns, self.tmp_sf);
+        data.tmp_ot = apply_sf(self.tmp_ot, self.tmp_sf);
     }
 }
 

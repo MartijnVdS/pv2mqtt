@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::traits::{SunSpecModel, ToStatusString};
-use super::types::{
-    InverterData, SUNSPEC_UNIMPLEMENTED_U16, apply_sf_i16_opt, apply_sf_u16_sf_opt,
-    apply_sf_u32_opt, apply_sf_u64_f64_opt,
-};
+use super::types::{InverterData, SUNSPEC_UNIMPLEMENTED_U16, apply_sf, apply_sf_f64};
 use sunspec::models::model701::{
     Alrm as Alrm701, DerMode as DerMode701, Model701, ThrotSrc as ThrotSrc701,
 };
@@ -160,29 +157,29 @@ fn map_throt_src(src: ThrotSrc701) -> Option<Vec<String>> {
 
 impl SunSpecModel for Model701 {
     fn into_inverter_data(self, data: &mut InverterData) {
-        data.aph_a = apply_sf_i16_opt(self.al1, self.a_sf);
-        data.aph_b = apply_sf_i16_opt(self.al2, self.a_sf);
-        data.aph_c = apply_sf_i16_opt(self.al3, self.a_sf);
-        data.v_an = apply_sf_u16_sf_opt(self.vl1, self.v_sf);
-        data.v_bn = apply_sf_u16_sf_opt(self.vl2, self.v_sf);
-        data.v_cn = apply_sf_u16_sf_opt(self.vl3, self.v_sf);
-        data.w = apply_sf_i16_opt(self.w, self.w_sf).unwrap_or(0.0);
-        data.va = apply_sf_i16_opt(self.va, self.va_sf);
-        data.v_ar = apply_sf_i16_opt(self.var, self.var_sf);
-        data.wh = apply_sf_u64_f64_opt(self.tot_wh_inj, self.tot_wh_sf).unwrap_or(0.0);
-        data.pf = apply_sf_i16_opt(self.pf, self.pf_sf);
-        data.hz = apply_sf_u32_opt(self.hz, self.hz_sf).unwrap_or(0.0);
+        data.aph_a = apply_sf(self.al1, self.a_sf);
+        data.aph_b = apply_sf(self.al2, self.a_sf);
+        data.aph_c = apply_sf(self.al3, self.a_sf);
+        data.v_an = apply_sf(self.vl1, self.v_sf);
+        data.v_bn = apply_sf(self.vl2, self.v_sf);
+        data.v_cn = apply_sf(self.vl3, self.v_sf);
+        data.w = apply_sf(self.w, self.w_sf).unwrap_or(0.0);
+        data.va = apply_sf(self.va, self.va_sf);
+        data.v_ar = apply_sf(self.var, self.var_sf);
+        data.wh = apply_sf_f64(self.tot_wh_inj, self.tot_wh_sf).unwrap_or(0.0);
+        data.pf = apply_sf(self.pf, self.pf_sf);
+        data.hz = apply_sf(self.hz, self.hz_sf).unwrap_or(0.0);
         data.st = self
             .inv_st
             .as_ref()
             .map(|s| s.to_status_string())
             .unwrap_or_else(|| "UNKNOWN".to_string());
-        data.tmp_cab = apply_sf_i16_opt(self.tmp_cab, self.tmp_sf);
-        data.tmp_snk = apply_sf_i16_opt(self.tmp_snk, self.tmp_sf);
-        data.tmp_trns = apply_sf_i16_opt(self.tmp_trns, self.tmp_sf);
-        data.tmp_ot = apply_sf_i16_opt(self.tmp_ot, self.tmp_sf);
-        data.tmp_amb = apply_sf_i16_opt(self.tmp_amb, self.tmp_sf);
-        data.tmp_sw = apply_sf_i16_opt(self.tmp_sw, self.tmp_sf);
+        data.tmp_cab = apply_sf(self.tmp_cab, self.tmp_sf);
+        data.tmp_snk = apply_sf(self.tmp_snk, self.tmp_sf);
+        data.tmp_trns = apply_sf(self.tmp_trns, self.tmp_sf);
+        data.tmp_ot = apply_sf(self.tmp_ot, self.tmp_sf);
+        data.tmp_amb = apply_sf(self.tmp_amb, self.tmp_sf);
+        data.tmp_sw = apply_sf(self.tmp_sw, self.tmp_sf);
 
         data.alrm = self.alrm.and_then(map_alrm);
         data.der_mode = self.der_mode.and_then(map_der_mode);
