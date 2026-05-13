@@ -973,6 +973,7 @@ name = "pv2mqtt"
 version = "1.5.2"
 dependencies = [
  "approx",
+ "bytes",
  "chrono",
  "rcgen",
  "rumqttc-next",

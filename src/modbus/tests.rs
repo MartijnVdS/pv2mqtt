@@ -41,7 +41,7 @@ fn test_topics() {
         .ha
         .generate_status_message(status_topic, "OK", None, None);
     let (topic, payload) = match msg {
-        MqttMessage::Publish { topic, payload, .. } => (topic, String::from_utf8(payload).unwrap()),
+        MqttMessage::Publish { topic, payload, .. } => (topic, String::from_utf8(payload.to_vec()).unwrap()),
     };
     assert_eq!(topic, "solar/inverter/SN123/status");
     assert!(payload.contains("\"timestamp\":null"));
@@ -52,7 +52,7 @@ fn test_topics() {
         .ha
         .generate_status_message(status_topic, "OK", None, Some(&now));
     let payload = match msg_with_ts {
-        MqttMessage::Publish { payload, .. } => String::from_utf8(payload).unwrap(),
+        MqttMessage::Publish { payload, .. } => String::from_utf8(payload.to_vec()).unwrap(),
     };
     assert!(payload.contains(&now.to_rfc3339()));
 }
@@ -79,7 +79,7 @@ fn test_discovery_message() {
         state_topic: None,
     };
     let (topic, payload_bytes) = task.ha.discovery_message("SN123", &ctx);
-    let payload = String::from_utf8(payload_bytes).unwrap();
+    let payload = String::from_utf8(payload_bytes.to_vec()).unwrap();
 
     assert_eq!(topic, "homeassistant/sensor/SN123/W/config");
     assert!(payload.contains("\"state_topic\":\"solar/inverter/SN123\""));
@@ -115,7 +115,7 @@ fn test_discovery_message_enum() {
         state_topic: None,
     };
     let (topic, payload_bytes) = task.ha.discovery_message("SN123", &ctx);
-    let payload = String::from_utf8(payload_bytes).unwrap();
+    let payload = String::from_utf8(payload_bytes.to_vec()).unwrap();
 
     assert_eq!(topic, "homeassistant/sensor/SN123/St/config");
     assert!(payload.contains("\"device_class\":\"enum\""));

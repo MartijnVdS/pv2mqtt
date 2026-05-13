@@ -65,7 +65,8 @@ impl HomeAssistantIntegration {
             "error": error.as_ref().map(|e| e.to_string()),
             "error_category": error.as_ref().map(|e| e.category()),
         }))
-        .unwrap_or_default();
+        .map(bytes::Bytes::from)
+        .unwrap_or_else(|_| bytes::Bytes::new());
 
         MqttMessage::Publish {
             topic,
@@ -309,7 +310,9 @@ impl HomeAssistantIntegration {
 
         messages.push(MqttMessage::Publish {
             topic,
-            payload: serde_json::to_vec(&payload).unwrap_or_default(),
+            payload: serde_json::to_vec(&payload)
+                .map(bytes::Bytes::from)
+                .unwrap_or_else(|_| bytes::Bytes::new()),
             retain: true,
         });
 
@@ -495,7 +498,7 @@ impl HomeAssistantIntegration {
         Vec::new()
     }
 
-    pub fn discovery_message(&self, serial: &str, ctx: &DiscoveryContext) -> (String, Vec<u8>) {
+    pub fn discovery_message(&self, serial: &str, ctx: &DiscoveryContext) -> (String, bytes::Bytes) {
         // Redundant with modern_component_payload, but kept for tests if they use it directly.
         let component = ctx.component.unwrap_or("sensor");
         let topic = format!(
@@ -554,7 +557,12 @@ impl HomeAssistantIntegration {
             payload["entity_category"] = json!(ec);
         }
 
-        (topic, serde_json::to_vec(&payload).unwrap_or_default())
+        (
+            topic,
+            serde_json::to_vec(&payload)
+                .map(bytes::Bytes::from)
+                .unwrap_or_else(|_| bytes::Bytes::new()),
+        )
     }
 }
 

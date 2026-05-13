@@ -2,6 +2,7 @@ use super::{ConnectionTask, DeviceState, POLL_TIMEOUT_SECS};
 use crate::error::{Pv2MqttError, Result};
 use crate::models::{ActiveControlModel, InverterData, poll_and_apply};
 use crate::mqtt::MqttMessage;
+use bytes::BufMut;
 use chrono::Utc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -60,7 +61,14 @@ impl ConnectionTask {
                     }
 
                     device_state.last_success_timestamp = Some(Utc::now());
-                    let payload = serde_json::to_vec(&data)?;
+
+                    device_state.serialization_buffer.clear();
+                    serde_json::to_writer(
+                        (&mut device_state.serialization_buffer).writer(),
+                        &data,
+                    )?;
+                    let payload = device_state.serialization_buffer.split().freeze();
+
                     let topic = device_state
                         .inverter_topic
                         .clone()

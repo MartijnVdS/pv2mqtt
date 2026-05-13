@@ -314,7 +314,7 @@ impl ConnectionTask {
                         .mqtt_tx
                         .send(crate::mqtt::MqttMessage::Publish {
                             topic: nameplate_topic,
-                            payload,
+                            payload: payload.into(),
                             retain: true,
                         })
                         .await;

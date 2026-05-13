@@ -105,6 +105,7 @@ impl ConnectionTask {
                 device: None,
                 inverter_topic: None,
                 status_topic: None,
+                serialization_buffer: bytes::BytesMut::with_capacity(1024),
             })
             .collect();
 

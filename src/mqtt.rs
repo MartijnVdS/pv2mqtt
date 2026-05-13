@@ -22,7 +22,7 @@ const MQTT_SHUTDOWN_TIMEOUT_MILLIS: u64 = 500;
 pub enum MqttMessage {
     Publish {
         topic: String,
-        payload: Vec<u8>,
+        payload: bytes::Bytes,
         retain: bool,
     },
 }

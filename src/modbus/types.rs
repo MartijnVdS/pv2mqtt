@@ -20,6 +20,7 @@ pub struct DeviceState {
     pub device: Option<AsyncDevice<Arc<Mutex<ModbusContext>>>>,
     pub inverter_topic: Option<String>,
     pub status_topic: Option<String>,
+    pub serialization_buffer: bytes::BytesMut,
 }
 
 impl DeviceState {
