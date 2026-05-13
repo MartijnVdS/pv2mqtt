@@ -10,15 +10,111 @@ pub struct HomeAssistantIntegration {
     ha_prefix: String,
 }
 
+pub struct SensorDefinition {
+    pub name: &'static str,
+    pub label: &'static str,
+    pub unit: Option<&'static str>,
+    pub device_class: Option<&'static str>,
+    pub state_class: Option<&'static str>,
+    pub entity_category: Option<&'static str>,
+    pub enabled_by_default: bool,
+}
+
+impl SensorDefinition {
+    pub fn new(name: &'static str, label: &'static str) -> Self {
+        let enabled_by_default = matches!(
+            name,
+            "W" | "WH" | "St" | "WMax" | "VAMax" | "VArMaxInj" | "VArMaxAbs"
+        );
+        let entity_category = if name.starts_with("Tmp") {
+            Some("diagnostic")
+        } else {
+            None
+        };
+
+        Self {
+            name,
+            label,
+            unit: None,
+            device_class: None,
+            state_class: None,
+            entity_category,
+            enabled_by_default,
+        }
+    }
+
+    pub fn unit(mut self, unit: &'static str) -> Self {
+        self.unit = Some(unit);
+        self
+    }
+
+    pub fn device_class(mut self, dc: &'static str) -> Self {
+        self.device_class = Some(dc);
+        self
+    }
+
+    pub fn state_class(mut self, sc: &'static str) -> Self {
+        self.state_class = Some(sc);
+        self
+    }
+
+    pub fn entity_category(mut self, ec: &'static str) -> Self {
+        self.entity_category = Some(ec);
+        self
+    }
+
+    pub fn enabled_by_default(mut self, enabled: bool) -> Self {
+        self.enabled_by_default = enabled;
+        self
+    }
+}
+
+pub struct ControlDefinition {
+    pub name: &'static str,
+    pub label: &'static str,
+    pub component: &'static str,
+    pub device_class: Option<&'static str>,
+    pub state_class: Option<&'static str>,
+    pub unit: Option<&'static str>,
+}
+
+impl ControlDefinition {
+    pub fn new(name: &'static str, label: &'static str, component: &'static str) -> Self {
+        Self {
+            name,
+            label,
+            component,
+            device_class: None,
+            state_class: None,
+            unit: None,
+        }
+    }
+
+    pub fn device_class(mut self, dc: &'static str) -> Self {
+        self.device_class = Some(dc);
+        self
+    }
+
+    pub fn state_class(mut self, sc: &'static str) -> Self {
+        self.state_class = Some(sc);
+        self
+    }
+
+    pub fn unit(mut self, unit: &'static str) -> Self {
+        self.unit = Some(unit);
+        self
+    }
+}
+
 pub struct DiscoveryContext<'a> {
     pub manufacturer: &'a str,
     pub model: &'a str,
     pub version: Option<&'a str>,
     pub name: &'a str,
     pub value_path: Option<String>,
-    pub unit: Option<&'a str>,
-    pub device_class: Option<&'a str>,
-    pub state_class: Option<&'a str>,
+    pub unit: Option<&'static str>,
+    pub device_class: Option<&'static str>,
+    pub state_class: Option<&'static str>,
     pub label: &'a str,
     pub enabled_by_default: bool,
     pub options: Option<Vec<&'static str>>,
@@ -27,14 +123,6 @@ pub struct DiscoveryContext<'a> {
     pub entity_category: Option<&'static str>,
     pub state_topic: Option<String>,
 }
-
-type SensorDefinitionTuple = (
-    &'static str,
-    Option<&'static str>,
-    Option<&'static str>,
-    Option<&'static str>,
-    &'static str,
-);
 
 impl HomeAssistantIntegration {
     pub fn new(topic_prefix: String, ha_prefix: String) -> Self {
@@ -91,11 +179,8 @@ impl HomeAssistantIntegration {
         let mut components = serde_json::Map::new();
 
         // Standard Sensors
-        for (name, unit, device_class, state_class, label) in
-            self.collect_sensor_definitions(model_id)
-        {
-            let enabled_by_default = matches!(name, "W" | "WH" | "St");
-            let options = if name == "St" {
+        for sensor in self.collect_sensor_definitions(model_id) {
+            let options = if sensor.name == "St" {
                 Some(vec![
                     "OFF",
                     "SLEEPING",
@@ -112,31 +197,25 @@ impl HomeAssistantIntegration {
                 None
             };
 
-            let entity_category = if name.starts_with("Tmp") {
-                Some("diagnostic")
-            } else {
-                None
-            };
-
             let ctx = DiscoveryContext {
                 manufacturer,
                 model,
                 version,
-                name,
+                name: sensor.name,
                 value_path: None,
-                unit,
-                device_class,
-                state_class,
-                label,
-                enabled_by_default,
+                unit: sensor.unit,
+                device_class: sensor.device_class,
+                state_class: sensor.state_class,
+                label: sensor.label,
+                enabled_by_default: sensor.enabled_by_default,
                 options,
                 component: Some("sensor"),
                 command_topic: None,
-                entity_category,
+                entity_category: sensor.entity_category,
                 state_topic: None,
             };
             components.insert(
-                name.to_string(),
+                sensor.name.to_string(),
                 self.modern_component_payload(serial, &ctx),
             );
         }
@@ -176,60 +255,38 @@ impl HomeAssistantIntegration {
                 active_control,
                 crate::models::ActiveControlModel::Model123 { .. }
             ) {
-                controls.push((
-                    "Conn",
-                    "switch",
-                    None,
-                    None,
-                    "Connection",
-                    format!("{}/inverter/{}/set/Conn", self.topic_prefix, serial),
-                ));
+                controls.push(ControlDefinition::new("Conn", "Connection", "switch"));
             }
 
             controls.extend(vec![
-                (
-                    "WMaxLimPct",
-                    "number",
-                    None,
-                    None,
-                    "Active Power Limit",
-                    format!("{}/inverter/{}/set/WMaxLimPct", self.topic_prefix, serial),
-                ),
-                (
-                    "WMaxLim_Ena",
-                    "switch",
-                    None,
-                    None,
-                    "Active Power Limit Enable",
-                    format!("{}/inverter/{}/set/WMaxLim_Ena", self.topic_prefix, serial),
-                ),
+                ControlDefinition::new("WMaxLimPct", "Active Power Limit", "number").unit("%"),
+                ControlDefinition::new("WMaxLim_Ena", "Active Power Limit Enable", "switch"),
             ]);
         }
 
-        for (name, component, device_class, state_class, label, cmd_topic) in controls {
+        for control in controls {
             let ctx = DiscoveryContext {
                 manufacturer,
                 model,
                 version,
-                name,
-                value_path: Some(format!("Controls.{}", name)),
-                unit: if name == "WMaxLimPct" {
-                    Some("%")
-                } else {
-                    None
-                },
-                device_class,
-                state_class,
-                label,
+                name: control.name,
+                value_path: Some(format!("Controls.{}", control.name)),
+                unit: control.unit,
+                device_class: control.device_class,
+                state_class: control.state_class,
+                label: control.label,
                 enabled_by_default: true,
                 options: None,
-                component: Some(component),
-                command_topic: Some(cmd_topic),
+                component: Some(control.component),
+                command_topic: Some(format!(
+                    "{}/inverter/{}/set/{}",
+                    self.topic_prefix, serial, control.name
+                )),
                 entity_category: None,
                 state_topic: None,
             };
             components.insert(
-                name.to_string(),
+                control.name.to_string(),
                 self.modern_component_payload(serial, &ctx),
             );
         }
@@ -237,56 +294,48 @@ impl HomeAssistantIntegration {
         // Nameplate Sensors
         let nameplate_topic = format!("{}/inverter/{}/nameplate", self.topic_prefix, serial);
         let nameplate_sensors = vec![
-            (
-                "WMax",
-                Some("W"),
-                Some("power"),
-                Some("measurement"),
-                "Max Active Power",
-            ),
-            (
-                "VAMax",
-                Some("VA"),
-                Some("apparent_power"),
-                Some("measurement"),
-                "Max Apparent Power",
-            ),
-            (
-                "VArMaxInj",
-                Some("var"),
-                Some("reactive_power"),
-                Some("measurement"),
-                "Max Reactive Power Injected",
-            ),
-            (
-                "VArMaxAbs",
-                Some("var"),
-                Some("reactive_power"),
-                Some("measurement"),
-                "Max Reactive Power Absorbed",
-            ),
+            SensorDefinition::new("WMax", "Max Active Power")
+                .unit("W")
+                .device_class("power")
+                .state_class("measurement")
+                .entity_category("diagnostic"),
+            SensorDefinition::new("VAMax", "Max Apparent Power")
+                .unit("VA")
+                .device_class("apparent_power")
+                .state_class("measurement")
+                .entity_category("diagnostic"),
+            SensorDefinition::new("VArMaxInj", "Max Reactive Power Injected")
+                .unit("var")
+                .device_class("reactive_power")
+                .state_class("measurement")
+                .entity_category("diagnostic"),
+            SensorDefinition::new("VArMaxAbs", "Max Reactive Power Absorbed")
+                .unit("var")
+                .device_class("reactive_power")
+                .state_class("measurement")
+                .entity_category("diagnostic"),
         ];
 
-        for (name, unit, device_class, state_class, label) in nameplate_sensors {
+        for sensor in nameplate_sensors {
             let ctx = DiscoveryContext {
                 manufacturer,
                 model,
                 version,
-                name,
+                name: sensor.name,
                 value_path: None,
-                unit,
-                device_class,
-                state_class,
-                label,
-                enabled_by_default: true,
+                unit: sensor.unit,
+                device_class: sensor.device_class,
+                state_class: sensor.state_class,
+                label: sensor.label,
+                enabled_by_default: sensor.enabled_by_default,
                 options: None,
                 component: Some("sensor"),
                 command_topic: None,
-                entity_category: Some("diagnostic"),
+                entity_category: sensor.entity_category,
                 state_topic: Some(nameplate_topic.clone()),
             };
             components.insert(
-                name.to_string(),
+                sensor.name.to_string(),
                 self.modern_component_payload(serial, &ctx),
             );
         }
@@ -363,125 +412,96 @@ impl HomeAssistantIntegration {
         payload
     }
 
-    fn collect_sensor_definitions(&self, model_id: Option<u16>) -> Vec<SensorDefinitionTuple> {
+    fn collect_sensor_definitions(&self, model_id: Option<u16>) -> Vec<SensorDefinition> {
         let mut sensors = vec![
-            ("W", Some("W"), Some("power"), Some("measurement"), "Power"),
-            (
-                "WH",
-                Some("Wh"),
-                Some("energy"),
-                Some("total_increasing"),
-                "Energy",
-            ),
-            (
-                "Hz",
-                Some("Hz"),
-                Some("frequency"),
-                Some("measurement"),
-                "Frequency",
-            ),
-            (
-                "TmpCab",
-                Some("°C"),
-                Some("temperature"),
-                Some("measurement"),
-                "Cabinet Temperature",
-            ),
-            (
-                "TmpSnk",
-                Some("°C"),
-                Some("temperature"),
-                Some("measurement"),
-                "Heat Sink Temperature",
-            ),
-            (
-                "PF",
-                None,
-                Some("power_factor"),
-                Some("measurement"),
-                "Power Factor",
-            ),
-            ("St", None, Some("enum"), None, "Status"),
+            SensorDefinition::new("W", "Power")
+                .unit("W")
+                .device_class("power")
+                .state_class("measurement"),
+            SensorDefinition::new("WH", "Energy")
+                .unit("Wh")
+                .device_class("energy")
+                .state_class("total_increasing"),
+            SensorDefinition::new("Hz", "Frequency")
+                .unit("Hz")
+                .device_class("frequency")
+                .state_class("measurement"),
+            SensorDefinition::new("TmpCab", "Cabinet Temperature")
+                .unit("°C")
+                .device_class("temperature")
+                .state_class("measurement"),
+            SensorDefinition::new("TmpSnk", "Heat Sink Temperature")
+                .unit("°C")
+                .device_class("temperature")
+                .state_class("measurement"),
+            SensorDefinition::new("PF", "Power Factor")
+                .device_class("power_factor")
+                .state_class("measurement"),
+            SensorDefinition::new("St", "Status").device_class("enum"),
         ];
 
         if let Some(id) = model_id {
-            sensors.push((
-                "PhVphA",
-                Some("V"),
-                Some("voltage"),
-                Some("measurement"),
-                "Voltage Phase A",
-            ));
-            sensors.push((
-                "AphA",
-                Some("A"),
-                Some("current"),
-                Some("measurement"),
-                "Current Phase A",
-            ));
+            sensors.push(
+                SensorDefinition::new("PhVphA", "Voltage Phase A")
+                    .unit("V")
+                    .device_class("voltage")
+                    .state_class("measurement"),
+            );
+            sensors.push(
+                SensorDefinition::new("AphA", "Current Phase A")
+                    .unit("A")
+                    .device_class("current")
+                    .state_class("measurement"),
+            );
 
             if id == 701 {
                 sensors.extend(vec![
-                    (
-                        "TmpAmb",
-                        Some("°C"),
-                        Some("temperature"),
-                        Some("measurement"),
-                        "Ambient Temperature",
-                    ),
-                    (
-                        "TmpSw",
-                        Some("°C"),
-                        Some("temperature"),
-                        Some("measurement"),
-                        "IGBT/MOSFET Temperature",
-                    ),
-                    ("Alrm", None, None, None, "Alarms"),
-                    ("MnAlrmInfo", None, None, None, "Manufacturer Alarm Info"),
-                    ("DERMode", None, None, None, "DER Operational Mode"),
-                    (
-                        "ThrotPct",
-                        Some("%"),
-                        None,
-                        Some("measurement"),
-                        "Throttling Percentage",
-                    ),
-                    ("ThrotSrc", None, None, None, "Throttling Source"),
+                    SensorDefinition::new("TmpAmb", "Ambient Temperature")
+                        .unit("°C")
+                        .device_class("temperature")
+                        .state_class("measurement"),
+                    SensorDefinition::new("TmpSw", "IGBT/MOSFET Temperature")
+                        .unit("°C")
+                        .device_class("temperature")
+                        .state_class("measurement"),
+                    SensorDefinition::new("Alrm", "Alarms"),
+                    SensorDefinition::new("MnAlrmInfo", "Manufacturer Alarm Info"),
+                    SensorDefinition::new("DERMode", "DER Operational Mode"),
+                    SensorDefinition::new("ThrotPct", "Throttling Percentage")
+                        .unit("%")
+                        .state_class("measurement"),
+                    SensorDefinition::new("ThrotSrc", "Throttling Source"),
                 ]);
             }
 
             if matches!(id, 102 | 103 | 112 | 113 | 701) {
-                sensors.push((
-                    "PhVphB",
-                    Some("V"),
-                    Some("voltage"),
-                    Some("measurement"),
-                    "Voltage Phase B",
-                ));
-                sensors.push((
-                    "AphB",
-                    Some("A"),
-                    Some("current"),
-                    Some("measurement"),
-                    "Current Phase B",
-                ));
+                sensors.push(
+                    SensorDefinition::new("PhVphB", "Voltage Phase B")
+                        .unit("V")
+                        .device_class("voltage")
+                        .state_class("measurement"),
+                );
+                sensors.push(
+                    SensorDefinition::new("AphB", "Current Phase B")
+                        .unit("A")
+                        .device_class("current")
+                        .state_class("measurement"),
+                );
             }
 
             if matches!(id, 103 | 113 | 701) {
-                sensors.push((
-                    "PhVphC",
-                    Some("V"),
-                    Some("voltage"),
-                    Some("measurement"),
-                    "Voltage Phase C",
-                ));
-                sensors.push((
-                    "AphC",
-                    Some("A"),
-                    Some("current"),
-                    Some("measurement"),
-                    "Current Phase C",
-                ));
+                sensors.push(
+                    SensorDefinition::new("PhVphC", "Voltage Phase C")
+                        .unit("V")
+                        .device_class("voltage")
+                        .state_class("measurement"),
+                );
+                sensors.push(
+                    SensorDefinition::new("AphC", "Current Phase C")
+                        .unit("A")
+                        .device_class("current")
+                        .state_class("measurement"),
+                );
             }
         }
         sensors
