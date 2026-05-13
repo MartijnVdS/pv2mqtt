@@ -237,36 +237,48 @@ impl ConnectionTask {
                 if self.token.is_cancelled() {
                     break;
                 }
-                let interval = Duration::from_secs(device_state.config.interval);
-                let next_poll = device_state
-                    .last_poll
-                    .map(|last| last + interval)
-                    .unwrap_or(now);
-
-                if next_poll <= now {
-                    device_state.last_poll = Some(now);
-                    let res = if device_state.device.is_none() {
-                        match self.discover_device(&client, device_state).await {
-                            Ok(_) => self.perform_device_poll(device_state, now).await,
-                            Err(e) => Err(e),
-                        }
-                    } else {
-                        self.perform_device_poll(device_state, now).await
-                    };
-
-                    if let Err(e) = res {
-                        if e.is_fatal() {
-                            return Err(e);
-                        }
-                        error!(
-                            "Error processing device {}: {}",
-                            device_state.config.unit_id, e
-                        );
-                    }
+                if self.process_device(device_state, &client, now).await? {
                     last_activity = Instant::now();
                 }
             }
         }
+    }
+
+    async fn process_device(
+        &self,
+        device_state: &mut DeviceState,
+        client: &AsyncClient<Arc<Mutex<ModbusContext>>>,
+        now: Instant,
+    ) -> Result<bool> {
+        let interval = Duration::from_secs(device_state.config.interval);
+        let next_poll = device_state
+            .last_poll
+            .map(|last| last + interval)
+            .unwrap_or(now);
+
+        if next_poll <= now {
+            device_state.last_poll = Some(now);
+            let res = if device_state.device.is_none() {
+                match self.discover_device(client, device_state).await {
+                    Ok(_) => self.perform_device_poll(device_state, now).await,
+                    Err(e) => Err(e),
+                }
+            } else {
+                self.perform_device_poll(device_state, now).await
+            };
+
+            if let Err(e) = res {
+                if e.is_fatal() {
+                    return Err(e);
+                }
+                error!(
+                    "Error processing device {}: {}",
+                    device_state.config.unit_id, e
+                );
+            }
+            return Ok(true);
+        }
+        Ok(false)
     }
 
     // Set up TLS on a TCP connection
