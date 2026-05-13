@@ -128,7 +128,10 @@ impl ConnectionConfig {
                 }
             }
             ModbusConfig::Rtu {
-                device, baud_rate, ..
+                device,
+                baud_rate,
+                stop_bits,
+                ..
             } => {
                 if device.is_empty() {
                     return Err(Pv2MqttError::Config(format!(
@@ -139,6 +142,12 @@ impl ConnectionConfig {
                 if *baud_rate == 0 {
                     return Err(Pv2MqttError::Config(format!(
                         "RTU baud rate cannot be 0 in connection '{}'",
+                        self.name
+                    )));
+                }
+                if *stop_bits != 1 && *stop_bits != 2 {
+                    return Err(Pv2MqttError::Config(format!(
+                        "RTU stop bits should be 1 or 2 in connection '{}'",
                         self.name
                     )));
                 }

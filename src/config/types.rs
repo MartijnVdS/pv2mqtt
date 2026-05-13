@@ -149,6 +149,8 @@ pub enum ModbusConfig {
         baud_rate: u32,
         #[serde(default)]
         parity: Parity,
+        #[serde(default = "default_stop_bits")]
+        stop_bits: u8,
     },
 }
 
@@ -164,4 +166,8 @@ pub struct DeviceConfig {
 
 fn default_polling_interval() -> u64 {
     60
+}
+
+fn default_stop_bits() -> u8 {
+    1
 }

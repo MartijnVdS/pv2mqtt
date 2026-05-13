@@ -95,10 +95,11 @@ impl ConnectionTask {
                 "Successfully executed command for {}. Waiting {}ms before immediate poll.",
                 cmd.serial, COMMAND_POLL_DELAY_MILLIS
             );
-            // Small delay to allow hardware to settle and update internal state
-            tokio::time::sleep(Duration::from_millis(COMMAND_POLL_DELAY_MILLIS)).await;
-            device_state.last_poll = None;
         }
+
+        // Small delay to allow hardware to settle and update internal state
+        tokio::time::sleep(Duration::from_millis(COMMAND_POLL_DELAY_MILLIS)).await;
+        device_state.last_poll = None;
     }
 
     async fn write_conn(

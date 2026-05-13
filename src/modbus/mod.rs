@@ -377,16 +377,27 @@ impl ConnectionTask {
                 device,
                 baud_rate,
                 parity,
+                stop_bits,
             } => {
                 info!(
                     "Connecting to Modbus RTU at {} ({} baud, parity: {:?})",
                     device, baud_rate, parity
                 );
-                let builder = tokio_serial::new(device, *baud_rate).parity(match parity {
-                    Parity::None => tokio_serial::Parity::None,
-                    Parity::Even => tokio_serial::Parity::Even,
-                    Parity::Odd => tokio_serial::Parity::Odd,
-                });
+
+                let stop = match stop_bits {
+                    1 => tokio_serial::StopBits::One,
+                    2 => tokio_serial::StopBits::Two,
+                    _ => tokio_serial::StopBits::One, // Default fallback, should never happen
+                };
+
+                let builder = tokio_serial::new(device, *baud_rate)
+                    .parity(match parity {
+                        Parity::None => tokio_serial::Parity::None,
+                        Parity::Even => tokio_serial::Parity::Even,
+                        Parity::Odd => tokio_serial::Parity::Odd,
+                    })
+                    .stop_bits(stop);
+
                 let port = SerialStream::open(&builder)
                     .map_err(|e| ModbusError::Io(std::io::Error::other(e)))?;
                 Ok(rtu::attach_slave(port, Slave(0)))

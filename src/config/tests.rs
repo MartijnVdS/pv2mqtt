@@ -316,6 +316,7 @@ fn test_invalid_baud_rate() {
                 device: "/dev/ttyUSB0".to_string(),
                 baud_rate: 0, // Invalid
                 parity: Parity::None,
+                stop_bits: 1,
             },
             devices: vec![DeviceConfig {
                 unit_id: 1,
@@ -356,11 +357,13 @@ fn test_rtu_config_parsing() {
         device,
         baud_rate,
         parity,
+        stop_bits,
     } = &conn.modbus
     {
         assert_eq!(device, "/dev/ttyUSB0");
         assert_eq!(*baud_rate, 9600);
         assert_eq!(*parity, Parity::Even);
+        assert_eq!(*stop_bits, 1)
     } else {
         panic!("Expected RTU config");
     }

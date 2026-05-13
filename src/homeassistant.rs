@@ -99,7 +99,8 @@ impl HomeAssistantIntegration {
                     "OFF",
                     "SLEEPING",
                     "STARTING",
-                    "MPPT",
+                    "MPPT",    // model 1x1-1x3
+                    "RUNNING", // model 701
                     "THROTTLED",
                     "SHUTTING_DOWN",
                     "FAULT",
@@ -302,7 +303,7 @@ impl HomeAssistantIntegration {
                 "sw": env!("CARGO_PKG_VERSION"),
             },
             "cmps": components,
-            "state_topic": self.inverter_topic(serial),
+            "stat_t": self.inverter_topic(serial),
             "qos": 1,
         });
 
@@ -319,41 +320,41 @@ impl HomeAssistantIntegration {
         let mut payload = json!({
             "p": ctx.component.unwrap_or("sensor"),
             "name": ctx.label,
-            "unique_id": format!("{}_{}_{}", self.topic_prefix, serial, ctx.name),
-            "value_template": format!(
+            "uniq_id": format!("{}_{}_{}", self.topic_prefix, serial, ctx.name),
+            "val_tpl": format!(
                 "{{{{ value_json.{} }}}}",
                 ctx.value_path.as_deref().unwrap_or(ctx.name)
             ),
-            "enabled_by_default": ctx.enabled_by_default,
+            "en": ctx.enabled_by_default,
         });
 
         if let Some(state_topic) = &ctx.state_topic {
-            payload["state_topic"] = json!(state_topic);
+            payload["stat_t"] = json!(state_topic);
         }
 
         if let Some(cmd_topic) = &ctx.command_topic {
-            payload["command_topic"] = json!(cmd_topic);
+            payload["cmd_t"] = json!(cmd_topic);
         }
 
         if ctx.component == Some("switch") {
-            payload["payload_on"] = json!(true);
-            payload["payload_off"] = json!(false);
+            payload["pl_on"] = json!(true);
+            payload["pl_off"] = json!(false);
         }
 
         if let Some(unit) = ctx.unit {
-            payload["unit_of_measurement"] = json!(unit);
+            payload["unit_of_meas"] = json!(unit);
         }
         if let Some(dc) = ctx.device_class {
-            payload["device_class"] = json!(dc);
+            payload["dev_cla"] = json!(dc);
         }
         if let Some(sc) = ctx.state_class {
-            payload["state_class"] = json!(sc);
+            payload["stat_cla"] = json!(sc);
         }
         if let Some(options) = &ctx.options {
-            payload["options"] = json!(options);
+            payload["ops"] = json!(options);
         }
         if let Some(ec) = ctx.entity_category {
-            payload["entity_category"] = json!(ec);
+            payload["ent_cat"] = json!(ec);
         }
 
         payload
@@ -390,7 +391,13 @@ impl HomeAssistantIntegration {
                 Some("measurement"),
                 "Heat Sink Temperature",
             ),
-            ("PF", None, Some("power_factor"), Some("measurement"), "Power Factor"),
+            (
+                "PF",
+                None,
+                Some("power_factor"),
+                Some("measurement"),
+                "Power Factor",
+            ),
             ("St", None, Some("enum"), None, "Status"),
         ];
 
@@ -680,25 +687,22 @@ mod tests {
         let body: serde_json::Value = serde_json::from_slice(payload).unwrap();
 
         // Check state topics
-        assert_eq!(body["state_topic"], "solar/inverter/SN123");
+        assert_eq!(body["stat_t"], "solar/inverter/SN123");
 
         let cmps = body["cmps"].as_object().unwrap();
 
         // W should inherit state_topic
-        assert!(cmps["W"]["state_topic"].is_null());
+        assert!(cmps["W"]["stat_t"].is_null());
 
         // WMax (nameplate) should override state_topic
-        assert_eq!(
-            cmps["WMax"]["state_topic"],
-            "solar/inverter/SN123/nameplate"
-        );
-        assert_eq!(cmps["WMax"]["entity_category"], "diagnostic");
+        assert_eq!(cmps["WMax"]["stat_t"], "solar/inverter/SN123/nameplate");
+        assert_eq!(cmps["WMax"]["ent_cat"], "diagnostic");
 
         // Temperature sensors should be diagnostic
-        assert_eq!(cmps["TmpCab"]["entity_category"], "diagnostic");
+        assert_eq!(cmps["TmpCab"]["ent_cat"], "diagnostic");
 
         // Check unique_id format
-        assert_eq!(cmps["W"]["unique_id"], "solar_SN123_W");
+        assert_eq!(cmps["W"]["uniq_id"], "solar_SN123_W");
     }
 
     #[test]

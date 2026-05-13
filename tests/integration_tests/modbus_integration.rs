@@ -216,7 +216,8 @@ async fn test_successful_poll_logic() {
         })
         .collect();
     assert_eq!(
-        discovery_msgs.len(), 1,
+        discovery_msgs.len(),
+        1,
         "Should have exactly 1 modern discovery message"
     );
 
@@ -228,7 +229,7 @@ async fn test_successful_poll_logic() {
     let payload_str = String::from_utf8_lossy(payload);
     assert!(payload_str.contains("\"mf\":\"Brand\""));
     assert!(payload_str.contains("\"mdl\":\"Model\""));
-    assert!(payload_str.contains("\"unique_id\":\"solar_SN1234_W\""));
+    assert!(payload_str.contains("\"uniq_id\":\"solar_SN1234_W\""));
 
     // Check for data messages
     let data_msgs: Vec<_> = messages
