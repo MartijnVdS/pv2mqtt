@@ -88,6 +88,7 @@ interval = 30
 #device = "/dev/ttyUSB0"
 #baud_rate = 9600
 #parity = "none" # options: none, even, odd (default: none)
+#stop_bits = 1 # or 2; default is 1
 #
 #[[connections.devices]]
 #unit_id = 1
