@@ -22,6 +22,17 @@ services:
       - mosquitto
     environment:
       RUST_LOG: pv2mqtt=trace
+    develop:
+      watch:
+        - path: ./src
+          action: rebuild
+        - path: ./Cargo.toml
+          action: rebuild
+        - path: ./Cargo.lock
+          action: rebuild
+        - path: ./dev/pv2mqtt.docker.toml
+          action: sync+restart
+          target: /app/pv2mqtt.toml
 
 volumes:
   mosquitto_data:
