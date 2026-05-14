@@ -143,6 +143,11 @@ impl ConnectionTask {
             return ActiveControlModel::None;
         }
 
+        // ".addr" of a model returns the start address of the first data point
+        // instead of the model header.
+        //
+        // Register offsets in the SunSpec documentation _do_ include the model
+        // header so subtract 2 from those when using "base_addr".
         if available_models.contains(&704) {
             info!("Using SunSpec Model 704 for controls on unit {}", unit_id);
             ActiveControlModel::Model704 {
