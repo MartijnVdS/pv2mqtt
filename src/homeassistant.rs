@@ -3,7 +3,7 @@
 use crate::error::Pv2MqttError;
 use crate::mqtt::MqttMessage;
 use chrono::{DateTime, Utc};
-use serde_json::json;
+use serde::Serialize;
 
 pub struct HomeAssistantIntegration {
     topic_prefix: String,
@@ -124,6 +124,70 @@ pub struct DiscoveryContext<'a> {
     pub state_topic: Option<String>,
 }
 
+#[derive(Serialize)]
+struct StatusPayload<'a> {
+    timestamp: Option<String>,
+    status: &'a str,
+    error: Option<String>,
+    error_category: Option<&'static str>,
+}
+
+#[derive(Serialize)]
+struct HaDevice<'a> {
+    ids: Vec<&'a str>,
+    name: String,
+    mf: &'a str,
+    mdl: &'a str,
+    #[serde(rename = "sw", skip_serializing_if = "Option::is_none")]
+    sw_version: Option<&'a str>,
+}
+
+#[derive(Serialize)]
+struct HaOrigin {
+    name: &'static str,
+    sw: &'static str,
+}
+
+#[derive(Serialize)]
+struct ModernComponentPayload {
+    #[serde(rename = "p")]
+    component: String,
+    name: String,
+    #[serde(rename = "uniq_id")]
+    unique_id: String,
+    #[serde(rename = "val_tpl")]
+    value_template: String,
+    #[serde(rename = "en")]
+    enabled: bool,
+    #[serde(rename = "stat_t", skip_serializing_if = "Option::is_none")]
+    state_topic: Option<String>,
+    #[serde(rename = "cmd_t", skip_serializing_if = "Option::is_none")]
+    command_topic: Option<String>,
+    #[serde(rename = "pl_on", skip_serializing_if = "Option::is_none")]
+    payload_on: Option<bool>,
+    #[serde(rename = "pl_off", skip_serializing_if = "Option::is_none")]
+    payload_off: Option<bool>,
+    #[serde(rename = "unit_of_meas", skip_serializing_if = "Option::is_none")]
+    unit_of_measurement: Option<&'static str>,
+    #[serde(rename = "dev_cla", skip_serializing_if = "Option::is_none")]
+    device_class: Option<&'static str>,
+    #[serde(rename = "stat_cla", skip_serializing_if = "Option::is_none")]
+    state_class: Option<&'static str>,
+    #[serde(rename = "ops", skip_serializing_if = "Option::is_none")]
+    options: Option<Vec<&'static str>>,
+    #[serde(rename = "ent_cat", skip_serializing_if = "Option::is_none")]
+    entity_category: Option<&'static str>,
+}
+
+#[derive(Serialize)]
+struct ModernDiscoveryPayload<'a> {
+    dev: HaDevice<'a>,
+    o: HaOrigin,
+    cmps: std::collections::BTreeMap<String, ModernComponentPayload>,
+    stat_t: String,
+    qos: u8,
+}
+
 impl HomeAssistantIntegration {
     pub fn new(topic_prefix: String, ha_prefix: String) -> Self {
         Self {
@@ -147,12 +211,12 @@ impl HomeAssistantIntegration {
         error: Option<&Pv2MqttError>,
         last_success: Option<&DateTime<Utc>>,
     ) -> MqttMessage {
-        let payload = serde_json::to_vec(&json!({
-            "timestamp": last_success.map(|dt| dt.to_rfc3339()),
-            "status": status,
-            "error": error.as_ref().map(|e| e.to_string()),
-            "error_category": error.as_ref().map(|e| e.category()),
-        }))
+        let payload = serde_json::to_vec(&StatusPayload {
+            timestamp: last_success.map(|dt| dt.to_rfc3339()),
+            status,
+            error: error.as_ref().map(|e| e.to_string()),
+            error_category: error.as_ref().map(|e| e.category()),
+        })
         .map(bytes::Bytes::from)
         .unwrap_or_else(|_| bytes::Bytes::new());
 
@@ -176,7 +240,7 @@ impl HomeAssistantIntegration {
 
         // 1. New Modern Discovery Message
         let topic = format!("{}/device/{}/config", self.ha_prefix, serial);
-        let mut components = serde_json::Map::new();
+        let mut components = std::collections::BTreeMap::new();
 
         // Standard Sensors
         for sensor in self.collect_sensor_definitions(model_id) {
@@ -340,22 +404,22 @@ impl HomeAssistantIntegration {
             );
         }
 
-        let payload = json!({
-            "dev": {
-                "ids": [serial],
-                "name": format!("Inverter {}", serial),
-                "mf": manufacturer,
-                "mdl": model,
-                "sw": version,
+        let payload = ModernDiscoveryPayload {
+            dev: HaDevice {
+                ids: vec![serial],
+                name: format!("Inverter {}", serial),
+                mf: manufacturer,
+                mdl: model,
+                sw_version: version,
             },
-            "o": {
-                "name": "pv2mqtt",
-                "sw": env!("CARGO_PKG_VERSION"),
+            o: HaOrigin {
+                name: "pv2mqtt",
+                sw: env!("CARGO_PKG_VERSION"),
             },
-            "cmps": components,
-            "stat_t": self.inverter_topic(serial),
-            "qos": 1,
-        });
+            cmps: components,
+            stat_t: self.inverter_topic(serial),
+            qos: 1,
+        };
 
         messages.push(MqttMessage::Publish {
             topic,
@@ -368,48 +432,38 @@ impl HomeAssistantIntegration {
         messages
     }
 
-    fn modern_component_payload(&self, serial: &str, ctx: &DiscoveryContext) -> serde_json::Value {
-        let mut payload = json!({
-            "p": ctx.component.unwrap_or("sensor"),
-            "name": ctx.label,
-            "uniq_id": format!("{}_{}_{}", self.topic_prefix, serial, ctx.name),
-            "val_tpl": format!(
+    fn modern_component_payload(
+        &self,
+        serial: &str,
+        ctx: &DiscoveryContext,
+    ) -> ModernComponentPayload {
+        ModernComponentPayload {
+            component: ctx.component.unwrap_or("sensor").to_string(),
+            name: ctx.label.to_string(),
+            unique_id: format!("{}_{}_{}", self.topic_prefix, serial, ctx.name),
+            value_template: format!(
                 "{{{{ value_json.{} }}}}",
                 ctx.value_path.as_deref().unwrap_or(ctx.name)
             ),
-            "en": ctx.enabled_by_default,
-        });
-
-        if let Some(state_topic) = &ctx.state_topic {
-            payload["stat_t"] = json!(state_topic);
+            enabled: ctx.enabled_by_default,
+            state_topic: ctx.state_topic.clone(),
+            command_topic: ctx.command_topic.clone(),
+            payload_on: if ctx.component == Some("switch") {
+                Some(true)
+            } else {
+                None
+            },
+            payload_off: if ctx.component == Some("switch") {
+                Some(false)
+            } else {
+                None
+            },
+            unit_of_measurement: ctx.unit,
+            device_class: ctx.device_class,
+            state_class: ctx.state_class,
+            options: ctx.options.clone(),
+            entity_category: ctx.entity_category,
         }
-
-        if let Some(cmd_topic) = &ctx.command_topic {
-            payload["cmd_t"] = json!(cmd_topic);
-        }
-
-        if ctx.component == Some("switch") {
-            payload["pl_on"] = json!(true);
-            payload["pl_off"] = json!(false);
-        }
-
-        if let Some(unit) = ctx.unit {
-            payload["unit_of_meas"] = json!(unit);
-        }
-        if let Some(dc) = ctx.device_class {
-            payload["dev_cla"] = json!(dc);
-        }
-        if let Some(sc) = ctx.state_class {
-            payload["stat_cla"] = json!(sc);
-        }
-        if let Some(options) = &ctx.options {
-            payload["ops"] = json!(options);
-        }
-        if let Some(ec) = ctx.entity_category {
-            payload["ent_cat"] = json!(ec);
-        }
-
-        payload
     }
 
     fn collect_sensor_definitions(&self, model_id: Option<u16>) -> Vec<SensorDefinition> {
@@ -505,84 +559,6 @@ impl HomeAssistantIntegration {
             }
         }
         sensors
-    }
-
-    pub fn generate_nameplate_discovery_messages(
-        &self,
-        _serial: &str,
-        _manufacturer: &str,
-        _model: &str,
-        _version: Option<&str>,
-    ) -> Vec<MqttMessage> {
-        // This is now redundant but kept for API compatibility during migration if needed.
-        Vec::new()
-    }
-
-    pub fn discovery_message(&self, serial: &str, ctx: &DiscoveryContext) -> (String, bytes::Bytes) {
-        // Redundant with modern_component_payload, but kept for tests if they use it directly.
-        let component = ctx.component.unwrap_or("sensor");
-        let topic = format!(
-            "{}/{}/{}/{}/config",
-            self.ha_prefix, component, serial, ctx.name
-        );
-        let state_topic = ctx
-            .state_topic
-            .clone()
-            .unwrap_or_else(|| self.inverter_topic(serial));
-        let mut payload = json!({
-            "name": ctx.label,
-            "state_topic": state_topic,
-            "value_template": format!(
-                "{{{{ value_json.{} }}}}",
-                ctx.value_path.as_deref().unwrap_or(ctx.name)
-            ),
-            "unique_id": format!("{}_{}_{}", self.topic_prefix, serial, ctx.name),
-            "force_update": true,
-            "enabled_by_default": ctx.enabled_by_default,
-            "device": {
-                "identifiers": [serial],
-                "name": format!("Inverter {}", serial),
-                "manufacturer": ctx.manufacturer,
-                "model": ctx.model,
-            }
-        });
-
-        if let Some(cmd_topic) = &ctx.command_topic {
-            payload["command_topic"] = json!(cmd_topic);
-        }
-
-        if component == "switch" {
-            payload["payload_on"] = json!(true);
-            payload["payload_off"] = json!(false);
-        }
-
-        if let Some(v) = ctx.version {
-            payload["device"]["sw_version"] = json!(v);
-        }
-
-        if let Some(unit) = ctx.unit {
-            payload["unit_of_measurement"] = json!(unit);
-        }
-        if let Some(dc) = ctx.device_class {
-            payload["device_class"] = json!(dc);
-        }
-        if let Some(sc) = ctx.state_class {
-            payload["state_class"] = json!(sc);
-        }
-        if let Some(options) = &ctx.options {
-            payload["options"] = json!(options);
-        }
-
-        if let Some(ec) = ctx.entity_category {
-            payload["entity_category"] = json!(ec);
-        }
-
-        (
-            topic,
-            serde_json::to_vec(&payload)
-                .map(bytes::Bytes::from)
-                .unwrap_or_else(|_| bytes::Bytes::new()),
-        )
     }
 }
 
@@ -685,17 +661,7 @@ mod tests {
         let body: serde_json::Value = serde_json::from_slice(payload).unwrap();
         let cmps = body["cmps"].as_object().unwrap();
         assert!(cmps.contains_key("ConnSt"));
-        assert!(cmps.contains_key("Alrm"));
-    }
-
-    #[test]
-    fn test_generate_nameplate_discovery_messages() {
-        let ha = HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string());
-        let msgs =
-            ha.generate_nameplate_discovery_messages("SN123", "Brand", "ModelX", Some("v1.0"));
-
-        // Now empty as it's merged into main discovery
-        assert_eq!(msgs.len(), 0);
+        assert!(body["cmps"].as_object().unwrap().contains_key("Alrm"));
     }
 
     #[test]

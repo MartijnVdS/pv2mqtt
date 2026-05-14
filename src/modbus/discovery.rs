@@ -309,30 +309,17 @@ impl ConnectionTask {
                 .unwrap_or("solar");
             let nameplate_topic = format!("{}/inverter/{}/nameplate", prefix, serial);
 
-            match serde_json::to_vec(&nameplate) {
-                Ok(payload) => {
-                    let _ = self
-                        .mqtt_tx
-                        .send(crate::mqtt::MqttMessage::Publish {
-                            topic: nameplate_topic,
-                            payload: payload.into(),
-                            retain: true,
-                        })
-                        .await;
-                }
-                Err(e) => warn!("Failed to serialize nameplate data: {}", e),
-            }
-
-            if self.ha_enabled {
-                let ha_msgs = self.ha.generate_nameplate_discovery_messages(
-                    serial,
-                    device_state.manufacturer.as_deref().unwrap_or(""),
-                    device_state.model.as_deref().unwrap_or(""),
-                    device_state.version.as_deref(),
-                );
-                for msg in ha_msgs {
-                    let _ = self.mqtt_tx.send(msg).await;
-                }
+            if let Err(e) = serde_json::to_vec(&nameplate) {
+                warn!("Failed to serialize nameplate data: {}", e);
+            } else if let Ok(payload) = serde_json::to_vec(&nameplate) {
+                let _ = self
+                    .mqtt_tx
+                    .send(crate::mqtt::MqttMessage::Publish {
+                        topic: nameplate_topic,
+                        payload: payload.into(),
+                        retain: true,
+                    })
+                    .await;
             }
         }
         Ok(())
