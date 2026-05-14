@@ -204,6 +204,14 @@ impl HomeAssistantIntegration {
         format!("{}/inverter/{}/status", self.topic_prefix, serial)
     }
 
+    pub fn discovery_topic(&self, serial: &str) -> String {
+        format!("{}/device/{}/config", self.ha_prefix, serial)
+    }
+
+    pub fn nameplate_topic(&self, serial: &str) -> String {
+        format!("{}/inverter/{}/nameplate", self.topic_prefix, serial)
+    }
+
     pub fn generate_status_message(
         &self,
         topic: String,
@@ -239,7 +247,6 @@ impl HomeAssistantIntegration {
         let mut messages = Vec::new();
 
         // 1. New Modern Discovery Message
-        let topic = format!("{}/device/{}/config", self.ha_prefix, serial);
         let mut components = std::collections::BTreeMap::new();
 
         // Standard Sensors
@@ -356,7 +363,7 @@ impl HomeAssistantIntegration {
         }
 
         // Nameplate Sensors
-        let nameplate_topic = format!("{}/inverter/{}/nameplate", self.topic_prefix, serial);
+        let nameplate_topic = self.nameplate_topic(serial);
         let nameplate_sensors = vec![
             SensorDefinition::new("WMax", "Max Active Power")
                 .unit("W")
@@ -422,7 +429,7 @@ impl HomeAssistantIntegration {
         };
 
         messages.push(MqttMessage::Publish {
-            topic,
+            topic: self.discovery_topic(serial),
             payload: serde_json::to_vec(&payload)
                 .map(bytes::Bytes::from)
                 .unwrap_or_else(|_| bytes::Bytes::new()),
@@ -565,6 +572,20 @@ impl HomeAssistantIntegration {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_topic_helpers() {
+        let ha = HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string());
+        let serial = "SN123";
+
+        assert_eq!(ha.inverter_topic(serial), "solar/inverter/SN123");
+        assert_eq!(ha.status_topic(serial), "solar/inverter/SN123/status");
+        assert_eq!(
+            ha.discovery_topic(serial),
+            "homeassistant/device/SN123/config"
+        );
+        assert_eq!(ha.nameplate_topic(serial), "solar/inverter/SN123/nameplate");
+    }
 
     #[test]
     fn test_generate_discovery_messages_m101() {

@@ -201,6 +201,8 @@ impl ConnectionTask {
 
                 device_state.inverter_topic = Some(self.ha.inverter_topic(&serial));
                 device_state.status_topic = Some(self.ha.status_topic(&serial));
+                device_state.discovery_topic = Some(self.ha.discovery_topic(&serial));
+                device_state.nameplate_topic = Some(self.ha.nameplate_topic(&serial));
 
                 if device_state.serial.as_ref() != Some(&serial) {
                     info!(
@@ -302,12 +304,10 @@ impl ConnectionTask {
         }
 
         if let Some(nameplate) = nameplate {
-            let prefix = device_state
-                .inverter_topic
-                .as_ref()
-                .and_then(|t| t.split('/').next())
-                .unwrap_or("solar");
-            let nameplate_topic = format!("{}/inverter/{}/nameplate", prefix, serial);
+            let nameplate_topic = device_state
+                .nameplate_topic
+                .clone()
+                .unwrap_or_else(|| self.ha.nameplate_topic(serial));
 
             if let Err(e) = serde_json::to_vec(&nameplate) {
                 warn!("Failed to serialize nameplate data: {}", e);
