@@ -68,7 +68,8 @@ unit_id = 1
 # Polling interval in seconds for this specific device.
 # Note: Low intervals (< 5s) can cause hardware lockups on some legacy inverters
 # and excessive load on the MQTT broker.
-interval = 30
+# Default: 60
+interval = 60
 
 # Optional: Override the default SunSpec model priority.
 # For example, if your inverter supports both 701 and 101, but the 101 data 
