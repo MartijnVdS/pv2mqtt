@@ -11,7 +11,6 @@ use tokio::sync::mpsc;
 use tokio_rustls::TlsAcceptor;
 use tokio_rustls::rustls;
 use tokio_util::sync::CancellationToken;
-use tracing::Instrument;
 use tracing_test::traced_test;
 
 #[tokio::test]
@@ -80,9 +79,7 @@ async fn test_tls_handshake_failure() {
         cmd_rx,
     };
 
-    let _task_handle = tokio::spawn(
-        async move { task.run_internal().await }.instrument(tracing::info_span!("run")),
-    );
+    let _task_handle = tokio::spawn(async move { task.run().await });
 
     // Use virtual time to avoid real-world sleeps
     tokio::time::pause();

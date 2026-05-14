@@ -80,12 +80,8 @@ impl ConnectionTask {
         }
     }
 
+    #[tracing::instrument(name="connection", skip(self), fields(name=self.config.name))]
     pub async fn run(self) -> Result<()> {
-        let span = info_span!("connection", name = %self.config.name);
-        self.run_internal().instrument(span).await
-    }
-
-    pub async fn run_internal(self) -> Result<()> {
         info!("Starting connection task");
 
         let mut devices: Vec<DeviceState> = self

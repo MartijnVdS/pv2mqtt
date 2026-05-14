@@ -134,7 +134,10 @@ fn handle_incoming_publish(
     };
 
     if p_set != "set" || parts.next().is_some() {
-        warn!("Received message for an unknown or malformed MQTT topic: {}", topic);
+        warn!(
+            "Received message for an unknown or malformed MQTT topic: {}",
+            topic
+        );
         return;
     }
 
@@ -187,12 +190,8 @@ impl MqttTask {
         }
     }
 
-    pub async fn run(self) -> Result<()> {
-        let span = info_span!("mqtt", client_id = %self.config.client_id);
-        self.run_internal().instrument(span).await
-    }
-
-    async fn run_internal(mut self) -> Result<()> {
+    #[tracing::instrument(name="mqtt", skip(self), fields(client_id=self.config.client_id))]
+    pub async fn run(mut self) -> Result<()> {
         let mqttoptions = self.configure_mqtt_options()?;
         let (client, eventloop) = AsyncClient::builder(mqttoptions).capacity(20).build();
 

@@ -13,7 +13,6 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::Instrument;
 use tracing_test::traced_test;
 
 fn setup_mock_sunspec_registers(r: &mut [u16]) -> usize {
@@ -109,9 +108,7 @@ async fn test_reconnection_logic() {
     };
 
     let token_clone = token.clone();
-    let task_handle = tokio::spawn(
-        async move { task.run_internal().await }.instrument(tracing::info_span!("run")),
-    );
+    let task_handle = tokio::spawn(async move { task.run().await });
 
     // Wait for the first connection
     handle_mock.notify.notified().await;
@@ -185,9 +182,7 @@ async fn test_successful_poll_logic() {
     };
 
     let token_clone = token.clone();
-    let task_handle = tokio::spawn(
-        async move { task.run_internal().await }.instrument(tracing::info_span!("run")),
-    );
+    let task_handle = tokio::spawn(async move { task.run().await });
 
     // Collect messages by advancing time in small increments
     let mut messages = Vec::new();
@@ -326,9 +321,7 @@ async fn test_command_execution_logic() {
     };
 
     let token_clone = token.clone();
-    let task_handle = tokio::spawn(
-        async move { task.run_internal().await }.instrument(tracing::info_span!("run")),
-    );
+    let task_handle = tokio::spawn(async move { task.run().await });
 
     // Wait a bit for discovery to finish
     tokio::time::advance(Duration::from_millis(100)).await;
@@ -450,9 +443,7 @@ async fn test_command_ignored_when_controls_disabled() {
     };
 
     let token_clone = token.clone();
-    let task_handle = tokio::spawn(
-        async move { task.run_internal().await }.instrument(tracing::info_span!("run")),
-    );
+    let task_handle = tokio::spawn(async move { task.run().await });
 
     // Advance to finish discovery
     let mut messages = Vec::new();
@@ -538,9 +529,7 @@ async fn test_discovery_disabled_logic() {
     };
 
     let token_clone = token.clone();
-    let task_handle = tokio::spawn(
-        async move { task.run_internal().await }.instrument(tracing::info_span!("run")),
-    );
+    let task_handle = tokio::spawn(async move { task.run().await });
 
     // Collect messages
     let mut messages = Vec::new();
@@ -640,9 +629,7 @@ async fn test_model_704_command_execution_logic() {
     };
 
     let token_clone = token.clone();
-    let task_handle = tokio::spawn(
-        async move { task.run_internal().await }.instrument(tracing::info_span!("run")),
-    );
+    let task_handle = tokio::spawn(async move { task.run().await });
 
     tokio::time::advance(Duration::from_millis(100)).await;
     let mut messages = Vec::new();
@@ -729,7 +716,7 @@ async fn test_discovery_reads_nameplate_and_publishes() {
     };
 
     let token_clone = token.clone();
-    let _task_handle = tokio::spawn(async move { task.run_internal().await });
+    let _task_handle = tokio::spawn(async move { task.run().await });
 
     // Advance time to trigger discovery and polling
     tokio::time::advance(Duration::from_secs(1)).await;

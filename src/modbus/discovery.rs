@@ -12,80 +12,76 @@ use tokio_modbus::slave::SlaveContext;
 use tracing::{Instrument, debug, info, info_span, warn};
 
 impl ConnectionTask {
+    #[tracing::instrument(skip(self, client, device_state), fields(unit_id=device_state.config.unit_id))]
     pub async fn discover_device(
         &self,
         client: &AsyncClient<Arc<Mutex<ModbusContext>>>,
         device_state: &mut DeviceState,
     ) -> Result<()> {
         let unit_id = device_state.config.unit_id;
-        let span = info_span!("discovery", unit_id);
 
-        async move {
-            let mut ctx = client.client.lock().await;
-            ctx.set_slave(Slave(unit_id));
-            drop(ctx);
+        let mut ctx = client.client.lock().await;
+        ctx.set_slave(Slave(unit_id));
+        drop(ctx);
 
-            let device_res = tokio::time::timeout(
-                Duration::from_secs(POLL_TIMEOUT_SECS),
-                client.device(unit_id),
-            )
-            .await;
+        let device_res = tokio::time::timeout(
+            Duration::from_secs(POLL_TIMEOUT_SECS),
+            client.device(unit_id),
+        )
+        .await;
 
-            let device = match device_res {
-                Ok(Ok(d)) => {
-                    debug!("Successfully identified unit {} as SunSpec device", unit_id);
-                    d
-                }
-                Ok(Err(e)) => {
-                    warn!("Modbus error during discovery for unit {}: {}", unit_id, e);
-                    return Err(Pv2MqttError::DeviceDiscovery(unit_id, ModbusError::from(e)));
-                }
-                Err(_) => {
-                    warn!("Timeout during discovery for unit {}", unit_id);
-                    return Err(Pv2MqttError::Modbus(ModbusError::Timeout(format!(
-                        "Timeout discovering device {}",
-                        unit_id
-                    ))));
-                }
-            };
+        let device = match device_res {
+            Ok(Ok(d)) => {
+                debug!("Successfully identified unit {} as SunSpec device", unit_id);
+                d
+            }
+            Ok(Err(e)) => {
+                warn!("Modbus error during discovery for unit {}: {}", unit_id, e);
+                return Err(Pv2MqttError::DeviceDiscovery(unit_id, ModbusError::from(e)));
+            }
+            Err(_) => {
+                warn!("Timeout during discovery for unit {}", unit_id);
+                return Err(Pv2MqttError::Modbus(ModbusError::Timeout(format!(
+                    "Timeout discovering device {}",
+                    unit_id
+                ))));
+            }
+        };
 
-            // Find supported inverter model
-            let available_models = device.models.supported_model_ids();
-            info!(
-                "Device supports SunSpec models: {}",
-                available_models
-                    .iter()
-                    .map(|id| id.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            );
+        // Find supported inverter model
+        let available_models = device.models.supported_model_ids();
+        info!(
+            "Device supports SunSpec models: {}",
+            available_models
+                .iter()
+                .map(|id| id.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
 
-            device_state.supported_model = Some(self.identify_inverter_model(
-                unit_id,
-                &available_models,
-                device_state.config.preferred_model,
-            )?);
+        device_state.supported_model = Some(self.identify_inverter_model(
+            unit_id,
+            &available_models,
+            device_state.config.preferred_model,
+        )?);
 
-            // Check if controls are enabled and identify which model to use
-            device_state.active_control = self.identify_control_model(
-                unit_id,
-                &available_models,
-                device_state.config.enable_controls,
-                &device,
-            );
+        // Check if controls are enabled and identify which model to use
+        device_state.active_control = self.identify_control_model(
+            unit_id,
+            &available_models,
+            device_state.config.enable_controls,
+            &device,
+        );
 
-            // Try to read Model 1 for metadata/serial
-            self.read_metadata(&device, device_state).await?;
+        // Try to read Model 1 for metadata/serial
+        self.read_metadata(&device, device_state).await?;
 
-            // Read and Publish Nameplate Data
-            self.read_nameplate(&device, device_state, &available_models)
-                .await?;
+        // Read and Publish Nameplate Data
+        self.read_nameplate(&device, device_state, &available_models)
+            .await?;
 
-            device_state.device = Some(device);
-            Ok(())
-        }
-        .instrument(span)
-        .await
+        device_state.device = Some(device);
+        Ok(())
     }
 
     fn identify_inverter_model(

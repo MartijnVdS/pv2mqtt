@@ -10,21 +10,11 @@ use sunspec::client::AsyncDevice;
 use tokio::sync::Mutex;
 use tokio_modbus::client::Context as ModbusContext;
 use tokio_modbus::slave::SlaveContext;
-use tracing::{Instrument, debug, error, info, info_span, warn};
+use tracing::{debug, error, info, warn};
 
 impl ConnectionTask {
+    #[tracing::instrument(name="poll", skip(self,device_state,now), fields(unit_id=device_state.config.unit_id))]
     pub async fn perform_device_poll(
-        &self,
-        device_state: &mut DeviceState,
-        now: Instant,
-    ) -> Result<()> {
-        let span = info_span!("poll", unit_id = device_state.config.unit_id);
-        self.perform_device_poll_internal(device_state, now)
-            .instrument(span)
-            .await
-    }
-
-    async fn perform_device_poll_internal(
         &self,
         device_state: &mut DeviceState,
         now: Instant,
