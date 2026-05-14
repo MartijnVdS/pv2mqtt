@@ -1,2 +1,27 @@
 /target
 pv2mqtt.toml
+
+# Secrets and sensitive files
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+*.csr
+*.der
+*.pub
+*.asc
+.env
+.env.*
+!.env.example
+*.secrets
+*.token
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
