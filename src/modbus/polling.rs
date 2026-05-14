@@ -15,7 +15,7 @@ use tracing::{debug, error, info, warn};
 impl ConnectionTask {
     #[tracing::instrument(name="poll", skip(self,device_state,now), fields(unit_id=device_state.config.unit_id))]
     pub async fn perform_device_poll(
-        &self,
+        &mut self,
         device_state: &mut DeviceState,
         now: Instant,
     ) -> Result<()> {

@@ -81,7 +81,7 @@ impl ConnectionTask {
     }
 
     #[tracing::instrument(name="connection", skip(self), fields(name=self.config.name))]
-    pub async fn run(self) -> Result<()> {
+    pub async fn run(mut self) -> Result<()> {
         info!("Starting connection task");
 
         let mut devices: Vec<DeviceState> = self
@@ -153,7 +153,7 @@ impl ConnectionTask {
     }
 
     async fn run_polling_loop(
-        &self,
+        &mut self,
         ctx: Arc<Mutex<ModbusContext>>,
         devices: &mut [DeviceState],
         mut cmd_rx: tokio::sync::broadcast::Receiver<crate::commands::ModbusCommand>,
@@ -244,7 +244,7 @@ impl ConnectionTask {
     }
 
     async fn process_device(
-        &self,
+        &mut self,
         device_state: &mut DeviceState,
         client: &AsyncClient<Arc<Mutex<ModbusContext>>>,
         now: Instant,

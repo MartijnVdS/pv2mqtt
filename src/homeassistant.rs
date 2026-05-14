@@ -3,11 +3,13 @@
 use crate::error::Pv2MqttError;
 use crate::mqtt::MqttMessage;
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Serialize, Serializer};
+use std::sync::Arc;
 
 pub struct HomeAssistantIntegration {
     topic_prefix: String,
     ha_prefix: String,
+    status_buffer: bytes::BytesMut,
 }
 
 pub struct SensorDefinition {
@@ -119,17 +121,40 @@ pub struct DiscoveryContext<'a> {
     pub enabled_by_default: bool,
     pub options: Option<Vec<&'static str>>,
     pub component: Option<&'static str>,
-    pub command_topic: Option<String>,
+    pub command_topic: Option<Arc<str>>,
     pub entity_category: Option<&'static str>,
-    pub state_topic: Option<String>,
+    pub state_topic: Option<Arc<str>>,
 }
 
 #[derive(Serialize)]
 struct StatusPayload<'a> {
-    timestamp: Option<String>,
+    #[serde(serialize_with = "serialize_opt_datetime")]
+    timestamp: Option<&'a DateTime<Utc>>,
     status: &'a str,
-    error: Option<String>,
+    #[serde(serialize_with = "serialize_opt_display")]
+    error: Option<&'a Pv2MqttError>,
     error_category: Option<&'static str>,
+}
+
+fn serialize_opt_datetime<S>(dt: &Option<&DateTime<Utc>>, s: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match dt {
+        Some(dt) => s.serialize_str(&dt.to_rfc3339()),
+        None => s.serialize_none(),
+    }
+}
+
+fn serialize_opt_display<S, T>(val: &Option<&T>, s: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+    T: std::fmt::Display,
+{
+    match val {
+        Some(v) => s.collect_str(v),
+        None => s.serialize_none(),
+    }
 }
 
 #[derive(Serialize)]
@@ -160,9 +185,9 @@ struct ModernComponentPayload {
     #[serde(rename = "en")]
     enabled: bool,
     #[serde(rename = "stat_t", skip_serializing_if = "Option::is_none")]
-    state_topic: Option<String>,
+    state_topic: Option<Arc<str>>,
     #[serde(rename = "cmd_t", skip_serializing_if = "Option::is_none")]
-    command_topic: Option<String>,
+    command_topic: Option<Arc<str>>,
     #[serde(rename = "pl_on", skip_serializing_if = "Option::is_none")]
     payload_on: Option<bool>,
     #[serde(rename = "pl_off", skip_serializing_if = "Option::is_none")]
@@ -184,7 +209,7 @@ struct ModernDiscoveryPayload<'a> {
     dev: HaDevice<'a>,
     o: HaOrigin,
     cmps: std::collections::BTreeMap<String, ModernComponentPayload>,
-    stat_t: String,
+    stat_t: Arc<str>,
     qos: u8,
 }
 
@@ -193,40 +218,47 @@ impl HomeAssistantIntegration {
         Self {
             topic_prefix,
             ha_prefix,
+            status_buffer: bytes::BytesMut::with_capacity(256),
         }
     }
 
-    pub fn inverter_topic(&self, serial: &str) -> String {
-        format!("{}/inverter/{}", self.topic_prefix, serial)
+    pub fn inverter_topic(&self, serial: &str) -> Arc<str> {
+        format!("{}/inverter/{}", self.topic_prefix, serial).into()
     }
 
-    pub fn status_topic(&self, serial: &str) -> String {
-        format!("{}/inverter/{}/status", self.topic_prefix, serial)
+    pub fn status_topic(&self, serial: &str) -> Arc<str> {
+        format!("{}/inverter/{}/status", self.topic_prefix, serial).into()
     }
 
-    pub fn discovery_topic(&self, serial: &str) -> String {
-        format!("{}/device/{}/config", self.ha_prefix, serial)
+    pub fn discovery_topic(&self, serial: &str) -> Arc<str> {
+        format!("{}/device/{}/config", self.ha_prefix, serial).into()
     }
 
-    pub fn nameplate_topic(&self, serial: &str) -> String {
-        format!("{}/inverter/{}/nameplate", self.topic_prefix, serial)
+    pub fn nameplate_topic(&self, serial: &str) -> Arc<str> {
+        format!("{}/inverter/{}/nameplate", self.topic_prefix, serial).into()
     }
 
     pub fn generate_status_message(
-        &self,
-        topic: String,
+        &mut self,
+        topic: Arc<str>,
         status: &str,
         error: Option<&Pv2MqttError>,
         last_success: Option<&DateTime<Utc>>,
     ) -> MqttMessage {
-        let payload = serde_json::to_vec(&StatusPayload {
-            timestamp: last_success.map(|dt| dt.to_rfc3339()),
-            status,
-            error: error.as_ref().map(|e| e.to_string()),
-            error_category: error.as_ref().map(|e| e.category()),
-        })
-        .map(bytes::Bytes::from)
-        .unwrap_or_else(|_| bytes::Bytes::new());
+        use bytes::BufMut;
+        self.status_buffer.clear();
+        let payload = match serde_json::to_writer(
+            (&mut self.status_buffer).writer(),
+            &StatusPayload {
+                timestamp: last_success,
+                status,
+                error,
+                error_category: error.as_ref().map(|e| e.category()),
+            },
+        ) {
+            Ok(_) => self.status_buffer.split().freeze(),
+            Err(_) => bytes::Bytes::new(),
+        };
 
         MqttMessage::Publish {
             topic,
@@ -349,10 +381,14 @@ impl HomeAssistantIntegration {
                 enabled_by_default: true,
                 options: None,
                 component: Some(control.component),
-                command_topic: Some(format!(
-                    "{}/inverter/{}/set/{}",
-                    self.topic_prefix, serial, control.name
-                )),
+                command_topic: Some(
+                    format!(
+                        "{}/inverter/{}/set/{}",
+                        self.topic_prefix, serial, control.name
+                    )
+                    .into(),
+                ),
+
                 entity_category: None,
                 state_topic: None,
             };
@@ -578,13 +614,16 @@ mod tests {
         let ha = HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string());
         let serial = "SN123";
 
-        assert_eq!(ha.inverter_topic(serial), "solar/inverter/SN123");
-        assert_eq!(ha.status_topic(serial), "solar/inverter/SN123/status");
+        assert_eq!(&*ha.inverter_topic(serial), "solar/inverter/SN123");
+        assert_eq!(&*ha.status_topic(serial), "solar/inverter/SN123/status");
         assert_eq!(
-            ha.discovery_topic(serial),
+            &*ha.discovery_topic(serial),
             "homeassistant/device/SN123/config"
         );
-        assert_eq!(ha.nameplate_topic(serial), "solar/inverter/SN123/nameplate");
+        assert_eq!(
+            &*ha.nameplate_topic(serial),
+            "solar/inverter/SN123/nameplate"
+        );
     }
 
     #[test]
@@ -606,7 +645,7 @@ mod tests {
         // Verify the modern message
         let modern_msg = &msgs[0];
         let MqttMessage::Publish { topic, payload, .. } = modern_msg;
-        assert_eq!(topic, "homeassistant/device/SN123/config");
+        assert_eq!(&**topic, "homeassistant/device/SN123/config");
         let body: serde_json::Value = serde_json::from_slice(payload).unwrap();
         assert_eq!(body["dev"]["ids"][0], "SN123");
         assert!(body["cmps"].as_object().unwrap().contains_key("W"));

@@ -220,7 +220,7 @@ async fn test_successful_poll_logic() {
     let device_discovery = discovery_msgs[0];
 
     let MqttMessage::Publish { topic, payload, .. } = device_discovery;
-    assert_eq!(*topic, "homeassistant/device/SN1234/config");
+    assert_eq!(&**topic, "homeassistant/device/SN1234/config");
     let payload_str = String::from_utf8_lossy(payload);
     assert!(payload_str.contains("\"mf\":\"Brand\""));
     assert!(payload_str.contains("\"mdl\":\"Model\""));
@@ -231,7 +231,7 @@ async fn test_successful_poll_logic() {
         .iter()
         .filter(|m| {
             let MqttMessage::Publish { topic, .. } = m;
-            topic == "solar/inverter/SN1234"
+            &**topic == "solar/inverter/SN1234"
         })
         .collect();
     assert!(!data_msgs.is_empty(), "Should have received poll data");
@@ -246,7 +246,7 @@ async fn test_successful_poll_logic() {
         .iter()
         .filter(|m| {
             let MqttMessage::Publish { topic, .. } = m;
-            topic == "solar/inverter/SN1234/status"
+            &**topic == "solar/inverter/SN1234/status"
         })
         .collect();
     assert!(

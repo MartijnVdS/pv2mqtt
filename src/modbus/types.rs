@@ -18,10 +18,10 @@ pub struct DeviceState {
     pub supported_model: Option<u16>,
     pub active_control: ActiveControlModel,
     pub device: Option<AsyncDevice<Arc<Mutex<ModbusContext>>>>,
-    pub inverter_topic: Option<String>,
-    pub status_topic: Option<String>,
-    pub nameplate_topic: Option<String>,
-    pub discovery_topic: Option<String>,
+    pub inverter_topic: Option<Arc<str>>,
+    pub status_topic: Option<Arc<str>>,
+    pub nameplate_topic: Option<Arc<str>>,
+    pub discovery_topic: Option<Arc<str>>,
     pub serialization_buffer: bytes::BytesMut,
 }
 

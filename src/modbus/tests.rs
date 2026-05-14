@@ -33,19 +33,17 @@ fn test_task() -> ConnectionTask {
 #[test]
 #[traced_test]
 fn test_topics() {
-    let task = test_task();
-    assert_eq!(task.ha.inverter_topic("SN123"), "solar/inverter/SN123");
+    let mut task = test_task();
+    assert_eq!(&*task.ha.inverter_topic("SN123"), "solar/inverter/SN123");
 
     let status_topic = task.ha.status_topic("SN123");
     let msg = task
         .ha
         .generate_status_message(status_topic, "OK", None, None);
     let (topic, payload) = match msg {
-        MqttMessage::Publish { topic, payload, .. } => {
-            (topic, String::from_utf8(payload.to_vec()).unwrap())
-        }
+        MqttMessage::Publish { topic, payload, .. } => (topic, String::from_utf8(payload.to_vec()).unwrap()),
     };
-    assert_eq!(topic, "solar/inverter/SN123/status");
+    assert_eq!(&*topic, "solar/inverter/SN123/status");
     assert!(payload.contains("\"timestamp\":null"));
 
     let now = Utc::now();

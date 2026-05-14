@@ -18,10 +18,10 @@ const MQTT_MAX_PAYLOAD_SIZE: usize = 64;
 const MQTT_RECONNECT_DELAY_SECS: u64 = 5;
 const MQTT_SHUTDOWN_TIMEOUT_MILLIS: u64 = 500;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum MqttMessage {
     Publish {
-        topic: String,
+        topic: Arc<str>,
         payload: bytes::Bytes,
         retain: bool,
     },
@@ -233,7 +233,7 @@ impl MqttTask {
                         String::from_utf8_lossy(&payload)
                     );
                     if let Err(e) = client
-                        .publish(topic, QoS::AtLeastOnce, retain, payload)
+                        .publish(&*topic, QoS::AtLeastOnce, retain, payload)
                         .await
                     {
                         let pv_err = Pv2MqttError::MqttPublish(e.to_string());
