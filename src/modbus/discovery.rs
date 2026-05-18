@@ -80,7 +80,7 @@ impl ConnectionTask {
         self.read_nameplate(&device, device_state, &available_models)
             .await?;
 
-        device_state.device = Some(device);
+        device_state.device = Some(Arc::new(device));
         Ok(())
     }
 
@@ -173,78 +173,61 @@ impl ConnectionTask {
         device_state: &mut DeviceState,
     ) -> Result<()> {
         let unit_id = device_state.config.unit_id;
-        let m1_res = tokio::time::timeout(
-            Duration::from_secs(POLL_TIMEOUT_SECS),
-            device.read_model::<Model1>(),
-        )
-        .instrument(info_span!("model1_read", unit_id))
-        .await;
+        let m1 = self
+            .read_model_with_timeout::<Model1>(device, unit_id)
+            .instrument(info_span!("model1_read", unit_id))
+            .await?;
 
-        match m1_res {
-            Ok(Ok(m1)) => {
-                let serial = m1.sn.trim().to_string();
-                let manufacturer = m1.mn.trim().to_string();
-                let model = m1.md.trim().to_string();
-                let version_opt = m1
-                    .vr
-                    .as_ref()
-                    .map(|v| v.trim().to_string())
-                    .filter(|v| !v.is_empty());
+        let serial = m1.sn.trim().to_string();
+        let manufacturer = m1.mn.trim().to_string();
+        let model = m1.md.trim().to_string();
+        let version_opt = m1
+            .vr
+            .as_ref()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
 
-                if serial.is_empty() {
-                    warn!(
-                        "Device {} returned an empty serial number, skipping discovery",
-                        unit_id
-                    );
-                    return Ok(());
-                }
-
-                device_state.inverter_topic = Some(self.ha.inverter_topic(&serial));
-                device_state.status_topic = Some(self.ha.status_topic(&serial));
-                device_state.discovery_topic = Some(self.ha.discovery_topic(&serial));
-                device_state.nameplate_topic = Some(self.ha.nameplate_topic(&serial));
-
-                if device_state.serial.as_ref() != Some(&serial) {
-                    info!(
-                        "Discovered device: {} {} (Serial: {})",
-                        manufacturer, model, serial
-                    );
-                    device_state.serial = Some(serial.clone());
-                    device_state.manufacturer = Some(manufacturer.clone());
-                    device_state.model = Some(model.clone());
-                    device_state.version = version_opt.clone();
-
-                    if self.ha_enabled {
-                        let messages = self.ha.generate_discovery_messages(
-                            &serial,
-                            &manufacturer,
-                            &model,
-                            version_opt.as_deref(),
-                            device_state.supported_model,
-                            device_state.active_control,
-                        );
-
-                        for msg in messages {
-                            self.mqtt_tx.send(msg).await?;
-                        }
-                    }
-                } else {
-                    info!("Refreshed connection to device (Serial: {})", serial);
-                }
-                Ok(())
-            }
-            Ok(Err(e)) => {
-                warn!("Failed to read Model 1 for unit {}: {}", unit_id, e);
-                Err(Pv2MqttError::DeviceDiscovery(unit_id, ModbusError::from(e)))
-            }
-            Err(_) => {
-                warn!("Timeout reading Model 1 for unit {}", unit_id);
-                Err(Pv2MqttError::Modbus(ModbusError::Timeout(format!(
-                    "Timeout reading Model 1 for device {}",
-                    unit_id
-                ))))
-            }
+        if serial.is_empty() {
+            warn!(
+                "Device {} returned an empty serial number, skipping discovery",
+                unit_id
+            );
+            return Ok(());
         }
+
+        device_state.inverter_topic = Some(self.ha.inverter_topic(&serial));
+        device_state.status_topic = Some(self.ha.status_topic(&serial));
+        device_state.discovery_topic = Some(self.ha.discovery_topic(&serial));
+        device_state.nameplate_topic = Some(self.ha.nameplate_topic(&serial));
+
+        if device_state.serial.as_ref() != Some(&serial) {
+            info!(
+                "Discovered device: {} {} (Serial: {})",
+                manufacturer, model, serial
+            );
+            device_state.serial = Some(serial.clone());
+            device_state.manufacturer = Some(manufacturer.clone());
+            device_state.model = Some(model.clone());
+            device_state.version = version_opt.clone();
+
+            if self.ha_enabled {
+                let messages = self.ha.generate_discovery_messages(
+                    &serial,
+                    &manufacturer,
+                    &model,
+                    version_opt.as_deref(),
+                    device_state.supported_model,
+                    device_state.active_control,
+                );
+
+                for msg in messages {
+                    self.mqtt_tx.send(msg).await?;
+                }
+            }
+        } else {
+            info!("Refreshed connection to device (Serial: {})", serial);
+        }
+        Ok(())
     }
 
     async fn read_nameplate(
@@ -262,45 +245,32 @@ impl ConnectionTask {
         let mut nameplate: Option<crate::models::NameplateData> = None;
 
         if available_models.contains(&702) {
-            match tokio::time::timeout(
-                Duration::from_secs(POLL_TIMEOUT_SECS),
-                device.read_model::<sunspec::models::model702::Model702>(),
-            )
-            .await
+            if let Ok(m702) = self
+                .read_model_with_timeout::<sunspec::models::model702::Model702>(device, unit_id)
+                .await
             {
-                Ok(Ok(m702)) => {
-                    debug!("Read Model 702 nameplate for unit {}", unit_id);
-                    use crate::models::apply_sf;
-                    nameplate = Some(crate::models::NameplateData {
-                        w_max: apply_sf(m702.w_max_rtg, m702.w_sf.unwrap_or(0)),
-                        va_max: apply_sf(m702.va_max_rtg, m702.va_sf.unwrap_or(0)),
-                        var_max_inj: apply_sf(m702.var_max_inj_rtg, m702.var_sf.unwrap_or(0)),
-                        var_max_abs: apply_sf(m702.var_max_abs_rtg, m702.var_sf.unwrap_or(0)),
-                    })
-                }
-                Ok(Err(e)) => warn!("Failed to read Model 702 for unit {}: {}", unit_id, e),
-                Err(_) => warn!("Timeout reading Model 702 for unit {}", unit_id),
+                debug!("Read Model 702 nameplate for unit {}", unit_id);
+                use crate::models::apply_sf;
+                nameplate = Some(crate::models::NameplateData {
+                    w_max: apply_sf(m702.w_max_rtg, m702.w_sf.unwrap_or(0)),
+                    va_max: apply_sf(m702.va_max_rtg, m702.va_sf.unwrap_or(0)),
+                    var_max_inj: apply_sf(m702.var_max_inj_rtg, m702.var_sf.unwrap_or(0)),
+                    var_max_abs: apply_sf(m702.var_max_abs_rtg, m702.var_sf.unwrap_or(0)),
+                });
             }
-        } else if available_models.contains(&120) {
-            match tokio::time::timeout(
-                Duration::from_secs(POLL_TIMEOUT_SECS),
-                device.read_model::<sunspec::models::model120::Model120>(),
-            )
-            .await
-            {
-                Ok(Ok(m120)) => {
-                    debug!("Read Model 120 nameplate for unit {}", unit_id);
-                    use crate::models::apply_sf;
-                    nameplate = Some(crate::models::NameplateData {
-                        w_max: apply_sf(m120.w_rtg, m120.w_rtg_sf),
-                        va_max: apply_sf(m120.va_rtg, m120.va_rtg_sf),
-                        var_max_inj: apply_sf(m120.v_ar_rtg_q1 as u16, m120.v_ar_rtg_sf), // Simplified mapping
-                        var_max_abs: apply_sf(m120.v_ar_rtg_q4 as u16, m120.v_ar_rtg_sf),
-                    });
-                }
-                Ok(Err(e)) => warn!("Failed to read Model 120 for unit {}: {}", unit_id, e),
-                Err(_) => warn!("Timeout reading Model 120 for unit {}", unit_id),
-            }
+        } else if available_models.contains(&120)
+            && let Ok(m120) = self
+                .read_model_with_timeout::<sunspec::models::model120::Model120>(device, unit_id)
+                .await
+        {
+            debug!("Read Model 120 nameplate for unit {}", unit_id);
+            use crate::models::apply_sf;
+            nameplate = Some(crate::models::NameplateData {
+                w_max: apply_sf(m120.w_rtg, m120.w_rtg_sf),
+                va_max: apply_sf(m120.va_rtg, m120.va_rtg_sf),
+                var_max_inj: apply_sf(m120.v_ar_rtg_q1 as u16, m120.v_ar_rtg_sf), // Simplified mapping
+                var_max_abs: apply_sf(m120.v_ar_rtg_q4 as u16, m120.v_ar_rtg_sf),
+            });
         }
 
         if let Some(nameplate) = nameplate {
@@ -309,9 +279,7 @@ impl ConnectionTask {
                 .clone()
                 .unwrap_or_else(|| self.ha.nameplate_topic(serial));
 
-            if let Err(e) = serde_json::to_vec(&nameplate) {
-                warn!("Failed to serialize nameplate data: {}", e);
-            } else if let Ok(payload) = serde_json::to_vec(&nameplate) {
+            if let Ok(payload) = serde_json::to_vec(&nameplate) {
                 let _ = self
                     .mqtt_tx
                     .send(crate::mqtt::MqttMessage::Publish {
@@ -323,5 +291,36 @@ impl ConnectionTask {
             }
         }
         Ok(())
+    }
+
+    async fn read_model_with_timeout<M>(
+        &self,
+        device: &sunspec::client::AsyncDevice<Arc<Mutex<ModbusContext>>>,
+        unit_id: u8,
+    ) -> Result<M>
+    where
+        M: sunspec::Model + Send + Sync,
+    {
+        let res = tokio::time::timeout(
+            Duration::from_secs(POLL_TIMEOUT_SECS),
+            device.read_model::<M>(),
+        )
+        .await;
+
+        match res {
+            Ok(Ok(m)) => Ok(m),
+            Ok(Err(e)) => {
+                warn!("Failed to read Model {} for unit {}: {}", M::ID, unit_id, e);
+                Err(Pv2MqttError::DeviceDiscovery(unit_id, ModbusError::from(e)))
+            }
+            Err(_) => {
+                warn!("Timeout reading Model {} for unit {}", M::ID, unit_id);
+                Err(Pv2MqttError::Modbus(ModbusError::Timeout(format!(
+                    "Timeout reading Model {} for device {}",
+                    M::ID,
+                    unit_id
+                ))))
+            }
+        }
     }
 }

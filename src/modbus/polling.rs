@@ -20,111 +20,106 @@ impl ConnectionTask {
         now: Instant,
     ) -> Result<()> {
         // ONLY poll if serial number and supported_model are known
-        if let (Some(serial), Some(model_id), Some(device)) = (
+        let (serial, model_id, device) = match (
             &device_state.serial,
             device_state.supported_model,
             &device_state.device,
         ) {
-            let poll_result = tokio::time::timeout(
-                Duration::from_secs(POLL_TIMEOUT_SECS),
-                self.poll_device(device, model_id),
-            )
-            .await;
+            (Some(s), Some(m), Some(d)) => (s, m, d),
+            _ => {
+                device_state.last_poll = Some(now);
+                return Ok(());
+            }
+        };
 
-            match poll_result {
-                Ok(Ok(mut data)) => {
-                    info!("Successfully polled (Serial: {})", serial);
+        let poll_res = tokio::time::timeout(
+            Duration::from_secs(POLL_TIMEOUT_SECS),
+            self.poll_device(device, model_id),
+        )
+        .await;
 
-                    // Optionally poll the active control model for status
-                    match device_state.active_control {
-                        ActiveControlModel::Model123 { .. } => {
-                            if let Err(e) = poll_and_apply(123, device, &mut data).await {
-                                warn!("Failed to poll controls (Model 123) for {}: {}", serial, e);
-                            }
-                        }
-                        ActiveControlModel::Model704 { .. } => {
-                            if let Err(e) = poll_and_apply(704, device, &mut data).await {
-                                warn!("Failed to poll controls (Model 704) for {}: {}", serial, e);
-                            }
-                        }
-                        ActiveControlModel::None => {}
-                    }
+        let mut data = match poll_res {
+            Ok(Ok(data)) => data,
+            Ok(Err(e)) => {
+                let pv_err = match e {
+                    Pv2MqttError::Modbus(me) => Pv2MqttError::ModelRead(model_id, me),
+                    _ => e,
+                };
+                error!("Failed to poll: {}", pv_err);
+                let _ = self
+                    .report_status(device_state, serial, "ERROR", Some(&pv_err))
+                    .await;
+                return Err(pv_err);
+            }
+            Err(_) => {
+                let pv_err = Pv2MqttError::Internal(format!("Timeout polling device {}", serial));
+                error!("{}", pv_err);
+                let _ = self
+                    .report_status(device_state, serial, "ERROR", Some(&pv_err))
+                    .await;
+                return Err(pv_err);
+            }
+        };
 
-                    device_state.last_success_timestamp = Some(Utc::now());
+        info!("Successfully polled (Serial: {})", serial);
 
-                    device_state.serialization_buffer.clear();
-                    serde_json::to_writer(
-                        (&mut device_state.serialization_buffer).writer(),
-                        &data,
-                    )?;
-                    let payload = device_state.serialization_buffer.split().freeze();
-
-                    let topic = device_state
-                        .inverter_topic
-                        .clone()
-                        .unwrap_or_else(|| self.ha.inverter_topic(serial));
-                    self.mqtt_tx
-                        .send(MqttMessage::Publish {
-                            topic,
-                            payload,
-                            retain: false,
-                        })
-                        .await?;
-
-                    let status_topic = device_state
-                        .status_topic
-                        .clone()
-                        .unwrap_or_else(|| self.ha.status_topic(serial));
-                    let status_msg = self.ha.generate_status_message(
-                        status_topic,
-                        "OK",
-                        None,
-                        device_state.last_success_timestamp.as_ref(),
-                    );
-                    self.mqtt_tx.send(status_msg).await?;
-                }
-                Ok(Err(e)) => {
-                    let pv_err = match e {
-                        Pv2MqttError::Modbus(me) => Pv2MqttError::ModelRead(model_id, me),
-                        _ => e,
-                    };
-                    error!("Failed to poll: {}", pv_err);
-                    // Update status with error
-                    let status_topic = device_state
-                        .status_topic
-                        .clone()
-                        .unwrap_or_else(|| self.ha.status_topic(serial));
-                    let status_msg = self.ha.generate_status_message(
-                        status_topic,
-                        "ERROR",
-                        Some(&pv_err),
-                        device_state.last_success_timestamp.as_ref(),
-                    );
-                    let _ = self.mqtt_tx.send(status_msg).await;
-                    return Err(pv_err);
-                }
-                Err(_) => {
-                    let pv_err =
-                        Pv2MqttError::Internal(format!("Timeout polling device {}", serial));
-                    error!("{}", pv_err);
-                    let status_topic = device_state
-                        .status_topic
-                        .clone()
-                        .unwrap_or_else(|| self.ha.status_topic(serial));
-                    let status_msg = self.ha.generate_status_message(
-                        status_topic,
-                        "ERROR",
-                        Some(&pv_err),
-                        device_state.last_success_timestamp.as_ref(),
-                    );
-                    let _ = self.mqtt_tx.send(status_msg).await;
-                    return Err(pv_err);
+        // Optionally poll the active control model for status
+        match device_state.active_control {
+            ActiveControlModel::Model123 { .. } => {
+                if let Err(e) = poll_and_apply(123, device, &mut data).await {
+                    warn!("Failed to poll controls (Model 123) for {}: {}", serial, e);
                 }
             }
+            ActiveControlModel::Model704 { .. } => {
+                if let Err(e) = poll_and_apply(704, device, &mut data).await {
+                    warn!("Failed to poll controls (Model 704) for {}: {}", serial, e);
+                }
+            }
+            ActiveControlModel::None => {}
         }
+
+        device_state.last_success_timestamp = Some(Utc::now());
+
+        device_state.serialization_buffer.clear();
+        serde_json::to_writer((&mut device_state.serialization_buffer).writer(), &data)?;
+        let payload = device_state.serialization_buffer.split().freeze();
+
+        let topic = device_state
+            .inverter_topic
+            .clone()
+            .unwrap_or_else(|| self.ha.inverter_topic(serial));
+        self.mqtt_tx
+            .send(MqttMessage::Publish {
+                topic,
+                payload,
+                retain: false,
+            })
+            .await?;
+
+        self.report_status(device_state, serial, "OK", None).await?;
 
         device_state.last_poll = Some(now);
         Ok(())
+    }
+
+    async fn report_status(
+        &mut self,
+        device_state: &DeviceState,
+        serial: &str,
+        status: &str,
+        error: Option<&Pv2MqttError>,
+    ) -> Result<()> {
+        let status_topic = device_state
+            .status_topic
+            .clone()
+            .unwrap_or_else(|| self.ha.status_topic(serial));
+        let status_msg = self.ha.generate_status_message(
+            status_topic,
+            status,
+            error,
+            device_state.last_success_timestamp.as_ref(),
+        );
+        self.mqtt_tx.send(status_msg).await.map_err(Into::into)
     }
 
     pub async fn poll_device(

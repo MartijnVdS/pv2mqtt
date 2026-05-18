@@ -88,23 +88,7 @@ impl ConnectionTask {
             .config
             .devices
             .iter()
-            .map(|d| DeviceState {
-                config: d.clone(),
-                last_poll: None,
-                last_success_timestamp: None,
-                serial: None,
-                manufacturer: None,
-                model: None,
-                version: None,
-                supported_model: None,
-                active_control: crate::models::ActiveControlModel::None,
-                device: None,
-                inverter_topic: None,
-                status_topic: None,
-                nameplate_topic: None,
-                discovery_topic: None,
-                serialization_buffer: bytes::BytesMut::with_capacity(1024),
-            })
+            .map(|d| DeviceState::new(d.clone()))
             .collect();
 
         let mut first_run = true;
@@ -171,22 +155,12 @@ impl ConnectionTask {
         let keep_alive_duration = Duration::from_secs(keep_alive_interval);
 
         loop {
-            let now = Instant::now();
-            let mut next_wakeup =
-                if keep_alive_interval > 0 && devices.iter().any(|d| d.device.is_some()) {
-                    last_activity + keep_alive_duration
-                } else {
-                    now + Duration::from_secs(DEFAULT_IDLE_SLEEP_SECS)
-                };
-
-            for device_state in devices.iter() {
-                let interval = Duration::from_secs(device_state.config.interval);
-                let next_poll = device_state
-                    .last_poll
-                    .map(|last| last + interval)
-                    .unwrap_or(now);
-                next_wakeup = next_wakeup.min(next_poll);
-            }
+            let next_wakeup = self.calculate_next_wakeup(
+                devices,
+                last_activity,
+                keep_alive_duration,
+                keep_alive_interval,
+            );
 
             let sleep_duration = next_wakeup
                 .saturating_duration_since(Instant::now())
@@ -210,28 +184,23 @@ impl ConnectionTask {
                             debug!("Command channel closed");
                         }
                     }
-                    // No continue here; we fall through to check if any polls are due.
-                    // This prevents a flood of commands from starving the polling logic.
                 }
                 _ = tokio::time::sleep(sleep_duration) => {}
             }
 
-            let now = Instant::now();
-
-            if keep_alive_interval > 0
-                && now.duration_since(last_activity) >= keep_alive_duration
-                && let Some((state, device)) = devices
-                    .iter()
-                    .find_map(|d| d.device.as_ref().map(|dev| (d, dev)))
+            if let Some(new_last_activity) = self
+                .perform_keep_alive(
+                    devices,
+                    last_activity,
+                    keep_alive_duration,
+                    keep_alive_interval,
+                )
+                .await?
             {
-                let ping_span = info_span!("keep_alive", unit_id = state.config.unit_id);
-                if let Err(e) = self.ping_device(device).instrument(ping_span).await {
-                    error!("Keep-alive failed: {}", e);
-                    return Err(e);
-                }
-                last_activity = Instant::now();
+                last_activity = new_last_activity;
             }
 
+            let now = Instant::now();
             for device_state in devices.iter_mut() {
                 if self.token.is_cancelled() {
                     break;
@@ -241,6 +210,53 @@ impl ConnectionTask {
                 }
             }
         }
+    }
+
+    fn calculate_next_wakeup(
+        &self,
+        devices: &[DeviceState],
+        last_activity: Instant,
+        keep_alive_duration: Duration,
+        keep_alive_interval: u64,
+    ) -> Instant {
+        let now = Instant::now();
+        let mut next_wakeup =
+            if keep_alive_interval > 0 && devices.iter().any(|d| d.device.is_some()) {
+                last_activity + keep_alive_duration
+            } else {
+                now + Duration::from_secs(DEFAULT_IDLE_SLEEP_SECS)
+            };
+
+        for device_state in devices {
+            let interval = Duration::from_secs(device_state.config.interval);
+            let next_poll = device_state
+                .last_poll
+                .map(|last| last + interval)
+                .unwrap_or(now);
+            next_wakeup = next_wakeup.min(next_poll);
+        }
+        next_wakeup
+    }
+
+    async fn perform_keep_alive(
+        &self,
+        devices: &[DeviceState],
+        last_activity: Instant,
+        keep_alive_duration: Duration,
+        keep_alive_interval: u64,
+    ) -> Result<Option<Instant>> {
+        let now = Instant::now();
+        if keep_alive_interval > 0
+            && now.duration_since(last_activity) >= keep_alive_duration
+            && let Some((state, device)) = devices
+                .iter()
+                .find_map(|d| d.device.as_ref().map(|dev| (d, dev)))
+        {
+            let ping_span = info_span!("keep_alive", unit_id = state.config.unit_id);
+            self.ping_device(device).instrument(ping_span).await?;
+            return Ok(Some(Instant::now()));
+        }
+        Ok(None)
     }
 
     async fn process_device(

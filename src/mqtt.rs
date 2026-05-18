@@ -84,66 +84,68 @@ async fn run_eventloop(
     }
 }
 
+struct MqttTopic<'a> {
+    serial: &'a str,
+    register: &'a str,
+}
+
+impl<'a> MqttTopic<'a> {
+    fn parse(topic: &'a str, prefix: &str) -> Option<Self> {
+        if !topic.starts_with(prefix) {
+            return None;
+        }
+
+        let rest = &topic[prefix.len()..];
+        if !rest.starts_with("/inverter/") {
+            return None;
+        }
+
+        let mut parts = rest[10..].split('/'); // skip "/inverter/"
+        let (Some(serial), Some(p_set), Some(register)) =
+            (parts.next(), parts.next(), parts.next())
+        else {
+            return None;
+        };
+
+        if p_set != "set" || parts.next().is_some() {
+            return None;
+        }
+
+        Some(MqttTopic { serial, register })
+    }
+}
+
 fn handle_incoming_publish(
     p: &rumqttc::Publish,
     cmd_tx: &tokio::sync::broadcast::Sender<ModbusCommand>,
     topic_prefix: &str,
 ) {
-    let topic = match std::str::from_utf8(&p.topic) {
-        Ok(s) => s,
-        Err(_) => {
-            warn!("Rejected MQTT message with non-UTF8 topic");
-            return;
-        }
+    let Ok(topic_str) = std::str::from_utf8(&p.topic) else {
+        warn!("Rejected MQTT message with non-UTF8 topic");
+        return;
     };
 
     // DoS protection: check payload size
     if p.payload.len() > MQTT_MAX_PAYLOAD_SIZE {
         warn!(
             "Rejected MQTT message on {} with excessive payload size: {} bytes",
-            topic,
+            topic_str,
             p.payload.len()
         );
         return;
     }
 
-    let payload = match std::str::from_utf8(&p.payload) {
-        Ok(s) => s.trim(),
-        Err(_) => {
-            warn!("Rejected MQTT message on {} with invalid UTF-8", topic);
-            return;
-        }
-    };
-
-    // Expected topic: {prefix}/inverter/{serial}/set/{register}
-    if !topic.starts_with(topic_prefix) {
-        return;
-    }
-
-    let rest = &topic[topic_prefix.len()..];
-    if !rest.starts_with("/inverter/") {
-        return;
-    }
-
-    let mut parts = rest[10..].split('/'); // skip "/inverter/"
-    let (Some(serial_part), Some(p_set), Some(register)) =
-        (parts.next(), parts.next(), parts.next())
-    else {
-        warn!("Received message for an unknown MQTT topic: {}", topic);
+    let Ok(payload) = std::str::from_utf8(&p.payload).map(|s| s.trim()) else {
+        warn!("Rejected MQTT message on {} with invalid UTF-8", topic_str);
         return;
     };
 
-    if p_set != "set" || parts.next().is_some() {
-        warn!(
-            "Received message for an unknown or malformed MQTT topic: {}",
-            topic
-        );
+    let Some(parsed) = MqttTopic::parse(topic_str, topic_prefix) else {
+        // Not for us or malformed, don't warn for every unrelated topic
         return;
-    }
+    };
 
-    let serial = serial_part.to_string();
-
-    let action = match register {
+    let action = match parsed.register {
         "Conn" => parse_mqtt_bool(payload).map(ControlAction::Conn),
         "WMaxLimPct" => payload.parse::<f32>().ok().map(ControlAction::WMaxLimPct),
         "WMaxLim_Ena" => parse_mqtt_bool(payload).map(ControlAction::WMaxLimEna),
@@ -151,12 +153,15 @@ fn handle_incoming_publish(
     };
 
     if let Some(action) = action {
-        info!("Broadcasting command for {}: {:?}", serial, action);
-        let _ = cmd_tx.send(ModbusCommand { serial, action });
+        info!("Broadcasting command for {}: {:?}", parsed.serial, action);
+        let _ = cmd_tx.send(ModbusCommand {
+            serial: parsed.serial.to_string(),
+            action,
+        });
     } else {
         warn!(
             "Received unknown or invalid command for {}: {}",
-            register, payload
+            parsed.register, payload
         );
     }
 }
@@ -311,6 +316,36 @@ mod tests {
     use super::*;
     use crate::config::MqttConfig;
     use tracing_test::traced_test;
+
+    #[test]
+    fn test_mqtt_topic_parse() {
+        let prefix = "solar";
+
+        // Valid
+        let t = MqttTopic::parse("solar/inverter/SN123/set/WMaxLimPct", prefix).unwrap();
+        assert_eq!(t.serial, "SN123");
+        assert_eq!(t.register, "WMaxLimPct");
+
+        // Valid multi-level prefix
+        let t = MqttTopic::parse("home/solar/inverter/SN456/set/Conn", "home/solar").unwrap();
+        assert_eq!(t.serial, "SN456");
+        assert_eq!(t.register, "Conn");
+
+        // Invalid prefix
+        assert!(MqttTopic::parse("other/inverter/SN123/set/WMaxLimPct", prefix).is_none());
+
+        // Malformed: missing /inverter/
+        assert!(MqttTopic::parse("solar/other/SN123/set/WMaxLimPct", prefix).is_none());
+
+        // Malformed: missing set
+        assert!(MqttTopic::parse("solar/inverter/SN123/get/WMaxLimPct", prefix).is_none());
+
+        // Malformed: missing register
+        assert!(MqttTopic::parse("solar/inverter/SN123/set", prefix).is_none());
+
+        // Malformed: extra segments
+        assert!(MqttTopic::parse("solar/inverter/SN123/set/WMaxLimPct/extra", prefix).is_none());
+    }
 
     #[tokio::test]
     #[traced_test]

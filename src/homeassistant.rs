@@ -276,12 +276,69 @@ impl HomeAssistantIntegration {
         model_id: Option<u16>,
         active_control: crate::models::ActiveControlModel,
     ) -> Vec<MqttMessage> {
-        let mut messages = Vec::new();
-
-        // 1. New Modern Discovery Message
         let mut components = std::collections::BTreeMap::new();
 
-        // Standard Sensors
+        self.add_standard_sensors(
+            serial,
+            manufacturer,
+            model,
+            version,
+            model_id,
+            &mut components,
+        );
+        self.add_binary_sensors(
+            serial,
+            manufacturer,
+            model,
+            version,
+            model_id,
+            &mut components,
+        );
+        self.add_controls(
+            serial,
+            manufacturer,
+            model,
+            version,
+            active_control,
+            &mut components,
+        );
+        self.add_nameplate_sensors(serial, manufacturer, model, version, &mut components);
+
+        let payload = ModernDiscoveryPayload {
+            dev: HaDevice {
+                ids: vec![serial],
+                name: format!("Inverter {}", serial),
+                mf: manufacturer,
+                mdl: model,
+                sw_version: version,
+            },
+            o: HaOrigin {
+                name: "pv2mqtt",
+                sw: env!("CARGO_PKG_VERSION"),
+            },
+            cmps: components,
+            stat_t: self.inverter_topic(serial),
+            qos: 1,
+        };
+
+        vec![MqttMessage::Publish {
+            topic: self.discovery_topic(serial),
+            payload: serde_json::to_vec(&payload)
+                .map(bytes::Bytes::from)
+                .unwrap_or_else(|_| bytes::Bytes::new()),
+            retain: true,
+        }]
+    }
+
+    fn add_standard_sensors(
+        &self,
+        serial: &str,
+        manufacturer: &str,
+        model: &str,
+        version: Option<&str>,
+        model_id: Option<u16>,
+        components: &mut std::collections::BTreeMap<String, ModernComponentPayload>,
+    ) {
         for sensor in self.collect_sensor_definitions(model_id) {
             let options = if sensor.name == "St" {
                 Some(vec![
@@ -322,8 +379,17 @@ impl HomeAssistantIntegration {
                 self.modern_component_payload(serial, &ctx),
             );
         }
+    }
 
-        // Binary Sensors
+    fn add_binary_sensors(
+        &self,
+        serial: &str,
+        manufacturer: &str,
+        model: &str,
+        version: Option<&str>,
+        model_id: Option<u16>,
+        components: &mut std::collections::BTreeMap<String, ModernComponentPayload>,
+    ) {
         if model_id == Some(701) {
             let binary_sensors = vec![("ConnSt", Some("connectivity"), "Grid Connection Status")];
             for (name, device_class, label) in binary_sensors {
@@ -350,8 +416,17 @@ impl HomeAssistantIntegration {
                 );
             }
         }
+    }
 
-        // Controls
+    fn add_controls(
+        &self,
+        serial: &str,
+        manufacturer: &str,
+        model: &str,
+        version: Option<&str>,
+        active_control: crate::models::ActiveControlModel,
+        components: &mut std::collections::BTreeMap<String, ModernComponentPayload>,
+    ) {
         let mut controls = Vec::new();
         if active_control != crate::models::ActiveControlModel::None {
             if matches!(
@@ -397,8 +472,16 @@ impl HomeAssistantIntegration {
                 self.modern_component_payload(serial, &ctx),
             );
         }
+    }
 
-        // Nameplate Sensors
+    fn add_nameplate_sensors(
+        &self,
+        serial: &str,
+        manufacturer: &str,
+        model: &str,
+        version: Option<&str>,
+        components: &mut std::collections::BTreeMap<String, ModernComponentPayload>,
+    ) {
         let nameplate_topic = self.nameplate_topic(serial);
         let nameplate_sensors = vec![
             SensorDefinition::new("WMax", "Max Active Power")
@@ -446,33 +529,6 @@ impl HomeAssistantIntegration {
                 self.modern_component_payload(serial, &ctx),
             );
         }
-
-        let payload = ModernDiscoveryPayload {
-            dev: HaDevice {
-                ids: vec![serial],
-                name: format!("Inverter {}", serial),
-                mf: manufacturer,
-                mdl: model,
-                sw_version: version,
-            },
-            o: HaOrigin {
-                name: "pv2mqtt",
-                sw: env!("CARGO_PKG_VERSION"),
-            },
-            cmps: components,
-            stat_t: self.inverter_topic(serial),
-            qos: 1,
-        };
-
-        messages.push(MqttMessage::Publish {
-            topic: self.discovery_topic(serial),
-            payload: serde_json::to_vec(&payload)
-                .map(bytes::Bytes::from)
-                .unwrap_or_else(|_| bytes::Bytes::new()),
-            retain: true,
-        });
-
-        messages
     }
 
     fn modern_component_payload(
@@ -537,70 +593,68 @@ impl HomeAssistantIntegration {
             SensorDefinition::new("St", "Status").device_class("enum"),
         ];
 
-        if let Some(id) = model_id {
-            sensors.push(
-                SensorDefinition::new("PhVphA", "Voltage Phase A")
+        let Some(id) = model_id else {
+            return sensors;
+        };
+
+        // Phase A is common to all models if model_id is present
+        sensors.extend(vec![
+            SensorDefinition::new("PhVphA", "Voltage Phase A")
+                .unit("V")
+                .device_class("voltage")
+                .state_class("measurement"),
+            SensorDefinition::new("AphA", "Current Phase A")
+                .unit("A")
+                .device_class("current")
+                .state_class("measurement"),
+        ]);
+
+        if id == 701 {
+            sensors.extend(vec![
+                SensorDefinition::new("TmpAmb", "Ambient Temperature")
+                    .unit("°C")
+                    .device_class("temperature")
+                    .state_class("measurement"),
+                SensorDefinition::new("TmpSw", "IGBT/MOSFET Temperature")
+                    .unit("°C")
+                    .device_class("temperature")
+                    .state_class("measurement"),
+                SensorDefinition::new("Alrm", "Alarms"),
+                SensorDefinition::new("MnAlrmInfo", "Manufacturer Alarm Info"),
+                SensorDefinition::new("DERMode", "DER Operational Mode"),
+                SensorDefinition::new("ThrotPct", "Throttling Percentage")
+                    .unit("%")
+                    .state_class("measurement"),
+                SensorDefinition::new("ThrotSrc", "Throttling Source"),
+            ]);
+        }
+
+        if matches!(id, 102 | 103 | 112 | 113 | 701) {
+            sensors.extend(vec![
+                SensorDefinition::new("PhVphB", "Voltage Phase B")
                     .unit("V")
                     .device_class("voltage")
                     .state_class("measurement"),
-            );
-            sensors.push(
-                SensorDefinition::new("AphA", "Current Phase A")
+                SensorDefinition::new("AphB", "Current Phase B")
                     .unit("A")
                     .device_class("current")
                     .state_class("measurement"),
-            );
-
-            if id == 701 {
-                sensors.extend(vec![
-                    SensorDefinition::new("TmpAmb", "Ambient Temperature")
-                        .unit("°C")
-                        .device_class("temperature")
-                        .state_class("measurement"),
-                    SensorDefinition::new("TmpSw", "IGBT/MOSFET Temperature")
-                        .unit("°C")
-                        .device_class("temperature")
-                        .state_class("measurement"),
-                    SensorDefinition::new("Alrm", "Alarms"),
-                    SensorDefinition::new("MnAlrmInfo", "Manufacturer Alarm Info"),
-                    SensorDefinition::new("DERMode", "DER Operational Mode"),
-                    SensorDefinition::new("ThrotPct", "Throttling Percentage")
-                        .unit("%")
-                        .state_class("measurement"),
-                    SensorDefinition::new("ThrotSrc", "Throttling Source"),
-                ]);
-            }
-
-            if matches!(id, 102 | 103 | 112 | 113 | 701) {
-                sensors.push(
-                    SensorDefinition::new("PhVphB", "Voltage Phase B")
-                        .unit("V")
-                        .device_class("voltage")
-                        .state_class("measurement"),
-                );
-                sensors.push(
-                    SensorDefinition::new("AphB", "Current Phase B")
-                        .unit("A")
-                        .device_class("current")
-                        .state_class("measurement"),
-                );
-            }
-
-            if matches!(id, 103 | 113 | 701) {
-                sensors.push(
-                    SensorDefinition::new("PhVphC", "Voltage Phase C")
-                        .unit("V")
-                        .device_class("voltage")
-                        .state_class("measurement"),
-                );
-                sensors.push(
-                    SensorDefinition::new("AphC", "Current Phase C")
-                        .unit("A")
-                        .device_class("current")
-                        .state_class("measurement"),
-                );
-            }
+            ]);
         }
+
+        if matches!(id, 103 | 113 | 701) {
+            sensors.extend(vec![
+                SensorDefinition::new("PhVphC", "Voltage Phase C")
+                    .unit("V")
+                    .device_class("voltage")
+                    .state_class("measurement"),
+                SensorDefinition::new("AphC", "Current Phase C")
+                    .unit("A")
+                    .device_class("current")
+                    .state_class("measurement"),
+            ]);
+        }
+
         sensors
     }
 }
