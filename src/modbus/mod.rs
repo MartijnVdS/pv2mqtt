@@ -223,7 +223,9 @@ impl<C: InverterConnection> ConnectionTask<C> {
                 if token.is_cancelled() {
                     break;
                 }
-                if Self::process_device(mqtt_tx, ha, ha_enabled, device_state, ctx.clone(), now).await? {
+                if Self::process_device(mqtt_tx, ha, ha_enabled, device_state, ctx.clone(), now)
+                    .await?
+                {
                     last_activity = Instant::now();
                 }
             }
@@ -273,6 +275,7 @@ impl<C: InverterConnection> ConnectionTask<C> {
         Ok(None)
     }
 
+    #[tracing::instrument(skip_all, fields(unit_id=device_state.config.unit_id))]
     async fn process_device(
         mqtt_tx: &mpsc::Sender<MqttMessage>,
         ha: &mut HomeAssistantIntegration,
@@ -302,10 +305,7 @@ impl<C: InverterConnection> ConnectionTask<C> {
                 if e.is_fatal() {
                     return Err(e);
                 }
-                error!(
-                    "Error processing device {}: {}",
-                    device_state.config.unit_id, e
-                );
+                error!("Error processing device: {}", e);
             }
             return Ok(true);
         }

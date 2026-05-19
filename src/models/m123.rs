@@ -2,11 +2,10 @@
 
 use super::traits::SunSpecModel;
 use super::types::{ControlData, InverterData, apply_sf};
-use sunspec::models::model123::Model123;
+use sunspec::models::model123::{Conn, Model123, WMaxLimEna};
 
 impl SunSpecModel for Model123 {
     fn into_inverter_data(self, data: &mut InverterData) {
-        use sunspec::models::model123::{Conn, WMaxLimEna};
         data.controls = Some(ControlData {
             conn: match self.conn {
                 Conn::Disconnect => Some(false),
@@ -29,7 +28,6 @@ mod tests {
     use crate::models::traits::SunSpecModel;
     use crate::models::types::InverterData;
     use approx::assert_relative_eq;
-    use sunspec::models::model123::{Conn, WMaxLimEna};
 
     #[test]
     fn test_model123_conversion() {
@@ -70,7 +68,7 @@ mod tests {
     }
 
     fn empty_m123() -> Model123 {
-        use sunspec::models::model123::{Conn, OutPfSetEna, VArPctEna, WMaxLimEna};
+        use sunspec::models::model123::{OutPfSetEna, VArPctEna};
         Model123 {
             conn_win_tms: None,
             conn_rvrt_tms: None,

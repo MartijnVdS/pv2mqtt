@@ -7,12 +7,11 @@ use crate::mqtt::MqttMessage;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio_modbus::client::Context as ModbusContext;
-use tracing::{info, info_span, Instrument};
+use tracing::{Instrument, info, info_span};
 
 type MqttTx = tokio::sync::mpsc::Sender<MqttMessage>;
 
 impl<C: InverterConnection> super::ConnectionTask<C> {
-    #[tracing::instrument(skip(mqtt_tx, ha, ha_enabled, ctx, device_state), fields(unit_id=device_state.config.unit_id))]
     pub async fn discover_device(
         mqtt_tx: &MqttTx,
         ha: &HomeAssistantIntegration,
@@ -71,7 +70,10 @@ impl<C: InverterConnection> super::ConnectionTask<C> {
                 }
             }
         } else {
-            info!("Refreshed connection to device (Serial: {})", metadata.serial);
+            info!(
+                "Refreshed connection to device (Serial: {})",
+                metadata.serial
+            );
         }
 
         // Read and Publish Nameplate Data

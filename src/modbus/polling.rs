@@ -14,7 +14,6 @@ use tracing::{error, info, warn};
 type MqttTx = tokio::sync::mpsc::Sender<MqttMessage>;
 
 impl<C: InverterConnection> super::ConnectionTask<C> {
-    #[tracing::instrument(name="poll", skip(mqtt_tx, ha, device_state, now), fields(unit_id=device_state.config.unit_id))]
     pub async fn perform_device_poll(
         mqtt_tx: &MqttTx,
         ha: &mut HomeAssistantIntegration,

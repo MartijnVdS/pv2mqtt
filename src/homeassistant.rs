@@ -2,6 +2,7 @@
 
 use crate::error::Pv2MqttError;
 use crate::mqtt::MqttMessage;
+use bytes::BufMut;
 use chrono::{DateTime, Utc};
 use serde::{Serialize, Serializer};
 use std::sync::Arc;
@@ -245,7 +246,6 @@ impl HomeAssistantIntegration {
         error: Option<&Pv2MqttError>,
         last_success: Option<&DateTime<Utc>>,
     ) -> MqttMessage {
-        use bytes::BufMut;
         self.status_buffer.clear();
         let payload = match serde_json::to_writer(
             (&mut self.status_buffer).writer(),

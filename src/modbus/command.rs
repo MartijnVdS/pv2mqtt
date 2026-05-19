@@ -5,6 +5,7 @@ use super::{
     M123_WMAX_LIM_ENA_OFFSET, M123_WMAX_LIM_PCT_OFFSET, M123_WMAX_LIM_PCT_SF_OFFSET,
     M704_WMAX_LIM_ENA_OFFSET, M704_WMAX_LIM_PCT_OFFSET, M704_WMAX_LIM_PCT_SF_OFFSET,
 };
+use crate::commands::ControlAction;
 use crate::error::{ModbusError, Pv2MqttError, Result};
 use crate::models::ActiveControlModel;
 use std::time::Duration;
@@ -40,14 +41,15 @@ impl<C: InverterConnection> super::ConnectionTask<C> {
         let device = match &device_state.device {
             Some(d) => d,
             None => {
-                error!("Cannot execute command for unit {}: device not connected", unit_id);
+                error!(
+                    "Cannot execute command for unit {}: device not connected",
+                    unit_id
+                );
                 return;
             }
         };
 
         let res: Result<()> = async {
-            use crate::commands::ControlAction;
-
             let (base_addr, conn_off, pct_off, ena_off, sf_off) = match device_state.active_control
             {
                 ActiveControlModel::Model123 { base_addr } => (
@@ -73,16 +75,13 @@ impl<C: InverterConnection> super::ConnectionTask<C> {
 
             match action {
                 ControlAction::Conn(connect) => {
-                    Self::write_conn(device.as_ref(), base_addr, conn_off, connect)
-                        .await
+                    Self::write_conn(device.as_ref(), base_addr, conn_off, connect).await
                 }
                 ControlAction::WMaxLimPct(pct) => {
-                    Self::write_wmax_lim_pct(device.as_ref(), base_addr, pct_off, sf_off, pct)
-                        .await
+                    Self::write_wmax_lim_pct(device.as_ref(), base_addr, pct_off, sf_off, pct).await
                 }
                 ControlAction::WMaxLimEna(enable) => {
-                    Self::write_wmax_lim_ena(device.as_ref(), base_addr, ena_off, enable)
-                        .await
+                    Self::write_wmax_lim_ena(device.as_ref(), base_addr, ena_off, enable).await
                 }
             }
         }

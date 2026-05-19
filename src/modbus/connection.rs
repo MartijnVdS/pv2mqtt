@@ -2,6 +2,7 @@
 
 use crate::config::DeviceConfig;
 use crate::error::{ModbusError, Pv2MqttError, Result};
+use crate::modbus::{POLL_TIMEOUT_SECS, READ_TIMEOUT_SECS};
 use crate::models::{
     ActiveControlModel, InverterData, NameplateData, SUPPORTED_INVERTER_DATA_MODELS, apply_sf,
     poll_and_apply,
@@ -84,7 +85,6 @@ impl SunSpecInverter {
     where
         M: sunspec::Model + Send + Sync,
     {
-        use crate::modbus::POLL_TIMEOUT_SECS;
         let res = tokio::time::timeout(
             Duration::from_secs(POLL_TIMEOUT_SECS),
             device.read_model::<M>(),
@@ -148,7 +148,6 @@ impl SunSpecInverter {
     }
 
     fn identify_control_model(
-        unit_id: u8,
         available_models: &[u16],
         enable_controls: bool,
         device: &AsyncDevice<Arc<Mutex<ModbusContext>>>,
@@ -158,19 +157,18 @@ impl SunSpecInverter {
         }
 
         if available_models.contains(&704) {
-            info!("Using SunSpec Model 704 for controls on unit {}", unit_id);
+            info!("Using SunSpec Model 704 for controls on unit");
             ActiveControlModel::Model704 {
                 base_addr: device.models.m704.addr,
             }
         } else if available_models.contains(&123) {
-            info!("Using SunSpec Model 123 for controls on unit {}", unit_id);
+            info!("Using SunSpec Model 123 for controls on unit");
             ActiveControlModel::Model123 {
                 base_addr: device.models.m123.addr,
             }
         } else {
             warn!(
-                "Device {} has controls enabled in config, but neither Model 704 nor Model 123 is supported by hardware.",
-                unit_id
+                "Device has controls enabled in config, but neither Model 704 nor Model 123 is supported by hardware."
             );
             ActiveControlModel::None
         }
@@ -191,8 +189,6 @@ impl InverterConnection for SunSpecInverter {
         unit_id: u8,
         config: &DeviceConfig,
     ) -> Result<Self> {
-        use crate::modbus::POLL_TIMEOUT_SECS;
-
         let client = AsyncClient::new(
             ctx.clone(),
             SunSpecConfig {
@@ -232,12 +228,8 @@ impl InverterConnection for SunSpecInverter {
         let supported_model =
             Self::identify_inverter_model(unit_id, &available_models, config.preferred_model)?;
 
-        let active_control = Self::identify_control_model(
-            unit_id,
-            &available_models,
-            config.enable_controls,
-            &device,
-        );
+        let active_control =
+            Self::identify_control_model(&available_models, config.enable_controls, &device);
 
         Ok(Self {
             device,
@@ -299,8 +291,6 @@ impl InverterConnection for SunSpecInverter {
     }
 
     async fn ping(&self) -> Result<()> {
-        use crate::modbus::READ_TIMEOUT_SECS;
-
         debug!("Sending keep-alive");
         let addr = self.device.models.m1.addr;
         let _regs = tokio::time::timeout(
