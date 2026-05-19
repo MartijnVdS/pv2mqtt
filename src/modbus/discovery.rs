@@ -1,287 +1,89 @@
-use super::{ConnectionTask, DeviceState, POLL_TIMEOUT_SECS};
-use crate::error::{ModbusError, Pv2MqttError, Result};
-use crate::models::{ActiveControlModel, SUPPORTED_INVERTER_DATA_MODELS};
+// SPDX-License-Identifier: Apache-2.0
+
+use super::{DeviceState, InverterConnection};
+use crate::error::Result;
+use crate::homeassistant::HomeAssistantIntegration;
+use crate::mqtt::MqttMessage;
 use std::sync::Arc;
-use std::time::Duration;
-use sunspec::client::AsyncClient;
-use sunspec::models::model1::Model1;
 use tokio::sync::Mutex;
-use tokio_modbus::Slave;
 use tokio_modbus::client::Context as ModbusContext;
-use tokio_modbus::slave::SlaveContext;
-use tracing::{Instrument, debug, info, info_span, warn};
+use tracing::{info, info_span, Instrument};
 
-impl ConnectionTask {
-    #[tracing::instrument(skip(self, client, device_state), fields(unit_id=device_state.config.unit_id))]
+type MqttTx = tokio::sync::mpsc::Sender<MqttMessage>;
+
+impl<C: InverterConnection> super::ConnectionTask<C> {
+    #[tracing::instrument(skip(mqtt_tx, ha, ha_enabled, ctx, device_state), fields(unit_id=device_state.config.unit_id))]
     pub async fn discover_device(
-        &self,
-        client: &AsyncClient<Arc<Mutex<ModbusContext>>>,
-        device_state: &mut DeviceState,
+        mqtt_tx: &MqttTx,
+        ha: &HomeAssistantIntegration,
+        ha_enabled: bool,
+        ctx: Arc<Mutex<ModbusContext>>,
+        device_state: &mut DeviceState<C>,
     ) -> Result<()> {
         let unit_id = device_state.config.unit_id;
 
-        let mut ctx = client.client.lock().await;
-        ctx.set_slave(Slave(unit_id));
-        drop(ctx);
+        let device = C::discover(ctx, unit_id, &device_state.config).await?;
 
-        let device_res = tokio::time::timeout(
-            Duration::from_secs(POLL_TIMEOUT_SECS),
-            client.device(unit_id),
-        )
-        .await;
-
-        let device = match device_res {
-            Ok(Ok(d)) => {
-                debug!("Successfully identified unit {} as SunSpec device", unit_id);
-                d
-            }
-            Ok(Err(e)) => {
-                warn!("Modbus error during discovery for unit {}: {}", unit_id, e);
-                return Err(Pv2MqttError::DeviceDiscovery(unit_id, ModbusError::from(e)));
-            }
-            Err(_) => {
-                warn!("Timeout during discovery for unit {}", unit_id);
-                return Err(Pv2MqttError::Modbus(ModbusError::Timeout(format!(
-                    "Timeout discovering device {}",
-                    unit_id
-                ))));
-            }
-        };
-
-        // Find supported inverter model
-        let available_models = device.models.supported_model_ids();
-        info!(
-            "Device supports SunSpec models: {}",
-            available_models
-                .iter()
-                .map(|id| id.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
-
-        device_state.supported_model = Some(self.identify_inverter_model(
-            unit_id,
-            &available_models,
-            device_state.config.preferred_model,
-        )?);
-
-        // Check if controls are enabled and identify which model to use
-        device_state.active_control = self.identify_control_model(
-            unit_id,
-            &available_models,
-            device_state.config.enable_controls,
-            &device,
-        );
-
-        // Try to read Model 1 for metadata/serial
-        self.read_metadata(&device, device_state).await?;
-
-        // Read and Publish Nameplate Data
-        self.read_nameplate(&device, device_state, &available_models)
+        // Try to read metadata/serial
+        let metadata = device
+            .read_metadata()
+            .instrument(info_span!("metadata_read", unit_id))
             .await?;
 
-        device_state.device = Some(Arc::new(device));
-        Ok(())
-    }
-
-    fn identify_inverter_model(
-        &self,
-        unit_id: u8,
-        available_models: &[u16],
-        preferred: Option<u16>,
-    ) -> Result<u16> {
-        let mut selected_model = None;
-
-        // Check if user has a preference
-        if let Some(preferred_id) = preferred {
-            if available_models.contains(&preferred_id) {
-                info!(
-                    "Using preferred SunSpec model {} for unit {}",
-                    preferred_id, unit_id
-                );
-                selected_model = Some(preferred_id);
-            } else {
-                warn!(
-                    "Preferred SunSpec model {} is not supported by hardware for unit {}. Falling back to default priority list.",
-                    preferred_id, unit_id
-                );
-            }
-        }
-
-        // Fallback to default priority list if no preference or preference was unavailable
-        if selected_model.is_none() {
-            selected_model = SUPPORTED_INVERTER_DATA_MODELS
-                .iter()
-                .find(|&&id| available_models.contains(&id))
-                .copied();
-        }
-
-        match selected_model {
-            Some(model_id) => Ok(model_id),
-            None => {
-                let available = available_models
-                    .iter()
-                    .map(|id| id.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                Err(Pv2MqttError::Internal(format!(
-                    "No supported inverter model found for unit {}. Available: {}",
-                    unit_id, available
-                )))
-            }
-        }
-    }
-
-    fn identify_control_model(
-        &self,
-        unit_id: u8,
-        available_models: &[u16],
-        enable_controls: bool,
-        device: &sunspec::client::AsyncDevice<Arc<Mutex<ModbusContext>>>,
-    ) -> ActiveControlModel {
-        if !enable_controls {
-            return ActiveControlModel::None;
-        }
-
-        // ".addr" of a model returns the start address of the first data point
-        // instead of the model header.
-        //
-        // Register offsets in the SunSpec documentation _do_ include the model
-        // header so subtract 2 from those when using "base_addr".
-        if available_models.contains(&704) {
-            info!("Using SunSpec Model 704 for controls on unit {}", unit_id);
-            ActiveControlModel::Model704 {
-                base_addr: device.models.m704.addr,
-            }
-        } else if available_models.contains(&123) {
-            info!("Using SunSpec Model 123 for controls on unit {}", unit_id);
-            ActiveControlModel::Model123 {
-                base_addr: device.models.m123.addr,
-            }
-        } else {
-            warn!(
-                "Device {} has controls enabled in config, but neither Model 704 nor Model 123 is supported by hardware.",
-                unit_id
-            );
-            ActiveControlModel::None
-        }
-    }
-
-    async fn read_metadata(
-        &self,
-        device: &sunspec::client::AsyncDevice<Arc<Mutex<ModbusContext>>>,
-        device_state: &mut DeviceState,
-    ) -> Result<()> {
-        let unit_id = device_state.config.unit_id;
-        let m1 = self
-            .read_model_with_timeout::<Model1>(device, unit_id)
-            .instrument(info_span!("model1_read", unit_id))
-            .await?;
-
-        let serial = m1.sn.trim().to_string();
-        let manufacturer = m1.mn.trim().to_string();
-        let model = m1.md.trim().to_string();
-        let version_opt = m1
-            .vr
-            .as_ref()
-            .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty());
-
-        if serial.is_empty() {
-            warn!(
+        if metadata.serial.is_empty() {
+            tracing::warn!(
                 "Device {} returned an empty serial number, skipping discovery",
                 unit_id
             );
             return Ok(());
         }
 
-        device_state.inverter_topic = Some(self.ha.inverter_topic(&serial));
-        device_state.status_topic = Some(self.ha.status_topic(&serial));
-        device_state.discovery_topic = Some(self.ha.discovery_topic(&serial));
-        device_state.nameplate_topic = Some(self.ha.nameplate_topic(&serial));
+        device_state.supported_model = Some(metadata.supported_model);
+        device_state.active_control = metadata.active_control;
 
-        if device_state.serial.as_ref() != Some(&serial) {
+        device_state.inverter_topic = Some(ha.inverter_topic(&metadata.serial));
+        device_state.status_topic = Some(ha.status_topic(&metadata.serial));
+        device_state.discovery_topic = Some(ha.discovery_topic(&metadata.serial));
+        device_state.nameplate_topic = Some(ha.nameplate_topic(&metadata.serial));
+
+        if device_state.serial.as_ref() != Some(&metadata.serial) {
             info!(
                 "Discovered device: {} {} (Serial: {})",
-                manufacturer, model, serial
+                metadata.manufacturer, metadata.model, metadata.serial
             );
-            device_state.serial = Some(serial.clone());
-            device_state.manufacturer = Some(manufacturer.clone());
-            device_state.model = Some(model.clone());
-            device_state.version = version_opt.clone();
+            device_state.serial = Some(metadata.serial.clone());
+            device_state.manufacturer = Some(metadata.manufacturer.clone());
+            device_state.model = Some(metadata.model.clone());
+            device_state.version = metadata.version.clone();
 
-            if self.ha_enabled {
-                let messages = self.ha.generate_discovery_messages(
-                    &serial,
-                    &manufacturer,
-                    &model,
-                    version_opt.as_deref(),
+            if ha_enabled {
+                let messages = ha.generate_discovery_messages(
+                    &metadata.serial,
+                    &metadata.manufacturer,
+                    &metadata.model,
+                    metadata.version.as_deref(),
                     device_state.supported_model,
                     device_state.active_control,
                 );
 
                 for msg in messages {
-                    self.mqtt_tx.send(msg).await?;
+                    mqtt_tx.send(msg).await?;
                 }
             }
         } else {
-            info!("Refreshed connection to device (Serial: {})", serial);
-        }
-        Ok(())
-    }
-
-    async fn read_nameplate(
-        &self,
-        device: &sunspec::client::AsyncDevice<Arc<Mutex<ModbusContext>>>,
-        device_state: &DeviceState,
-        available_models: &[u16],
-    ) -> Result<()> {
-        let serial = match &device_state.serial {
-            Some(s) => s,
-            None => return Ok(()),
-        };
-        let unit_id = device_state.config.unit_id;
-
-        let mut nameplate: Option<crate::models::NameplateData> = None;
-
-        if available_models.contains(&702) {
-            if let Ok(m702) = self
-                .read_model_with_timeout::<sunspec::models::model702::Model702>(device, unit_id)
-                .await
-            {
-                debug!("Read Model 702 nameplate for unit {}", unit_id);
-                use crate::models::apply_sf;
-                nameplate = Some(crate::models::NameplateData {
-                    w_max: apply_sf(m702.w_max_rtg, m702.w_sf.unwrap_or(0)),
-                    va_max: apply_sf(m702.va_max_rtg, m702.va_sf.unwrap_or(0)),
-                    var_max_inj: apply_sf(m702.var_max_inj_rtg, m702.var_sf.unwrap_or(0)),
-                    var_max_abs: apply_sf(m702.var_max_abs_rtg, m702.var_sf.unwrap_or(0)),
-                });
-            }
-        } else if available_models.contains(&120)
-            && let Ok(m120) = self
-                .read_model_with_timeout::<sunspec::models::model120::Model120>(device, unit_id)
-                .await
-        {
-            debug!("Read Model 120 nameplate for unit {}", unit_id);
-            use crate::models::apply_sf;
-            nameplate = Some(crate::models::NameplateData {
-                w_max: apply_sf(m120.w_rtg, m120.w_rtg_sf),
-                va_max: apply_sf(m120.va_rtg, m120.va_rtg_sf),
-                var_max_inj: apply_sf(m120.v_ar_rtg_q1 as u16, m120.v_ar_rtg_sf), // Simplified mapping
-                var_max_abs: apply_sf(m120.v_ar_rtg_q4 as u16, m120.v_ar_rtg_sf),
-            });
+            info!("Refreshed connection to device (Serial: {})", metadata.serial);
         }
 
-        if let Some(nameplate) = nameplate {
+        // Read and Publish Nameplate Data
+        let available_models = device.supported_model_ids();
+        if let Some(nameplate) = device.read_nameplate(&available_models).await? {
             let nameplate_topic = device_state
                 .nameplate_topic
                 .clone()
-                .unwrap_or_else(|| self.ha.nameplate_topic(serial));
+                .unwrap_or_else(|| ha.nameplate_topic(&metadata.serial));
 
             if let Ok(payload) = serde_json::to_vec(&nameplate) {
-                let _ = self
-                    .mqtt_tx
+                let _ = mqtt_tx
                     .send(crate::mqtt::MqttMessage::Publish {
                         topic: nameplate_topic,
                         payload: payload.into(),
@@ -290,37 +92,8 @@ impl ConnectionTask {
                     .await;
             }
         }
+
+        device_state.device = Some(Arc::new(device));
         Ok(())
-    }
-
-    async fn read_model_with_timeout<M>(
-        &self,
-        device: &sunspec::client::AsyncDevice<Arc<Mutex<ModbusContext>>>,
-        unit_id: u8,
-    ) -> Result<M>
-    where
-        M: sunspec::Model + Send + Sync,
-    {
-        let res = tokio::time::timeout(
-            Duration::from_secs(POLL_TIMEOUT_SECS),
-            device.read_model::<M>(),
-        )
-        .await;
-
-        match res {
-            Ok(Ok(m)) => Ok(m),
-            Ok(Err(e)) => {
-                warn!("Failed to read Model {} for unit {}: {}", M::ID, unit_id, e);
-                Err(Pv2MqttError::DeviceDiscovery(unit_id, ModbusError::from(e)))
-            }
-            Err(_) => {
-                warn!("Timeout reading Model {} for unit {}", M::ID, unit_id);
-                Err(Pv2MqttError::Modbus(ModbusError::Timeout(format!(
-                    "Timeout reading Model {} for device {}",
-                    M::ID,
-                    unit_id
-                ))))
-            }
-        }
     }
 }

@@ -2,10 +2,9 @@
 
 use crate::common::modbus_server;
 use pv2mqtt::config::{ConnectionConfig, DeviceConfig, ModbusConfig};
-use pv2mqtt::homeassistant::HomeAssistantIntegration;
 use pv2mqtt::modbus::{
     ConnectionTask, M123_CONN_OFFSET, M123_WMAX_LIM_PCT_SF_OFFSET, M704_WMAX_LIM_PCT_OFFSET,
-    M704_WMAX_LIM_PCT_SF_OFFSET, RECONNECT_TIMEOUT_SECS,
+    M704_WMAX_LIM_PCT_SF_OFFSET, RECONNECT_TIMEOUT_SECS, SunSpecInverter,
 };
 use pv2mqtt::mqtt::MqttMessage;
 use std::sync::Arc;
@@ -81,8 +80,18 @@ async fn test_reconnection_logic() {
     let root_cert_store = Arc::new(rustls::RootCertStore::empty());
 
     let (_, cmd_rx) = tokio::sync::broadcast::channel(1);
-    let task = ConnectionTask {
-        config: ConnectionConfig {
+    let mqtt_config = pv2mqtt::config::MqttConfig {
+        url: "mqtt://localhost".to_string(),
+        client_id: "test".to_string(),
+        topic_prefix: "solar".to_string(),
+        ha_prefix: "homeassistant".to_string(),
+        ha_enabled: true,
+        ca_path: None,
+        cert_path: None,
+        key_path: None,
+    };
+    let task = ConnectionTask::<SunSpecInverter>::new(
+        ConnectionConfig {
             name: "test".to_string(),
             modbus: ModbusConfig::Tcp {
                 address: addr_str,
@@ -99,13 +108,12 @@ async fn test_reconnection_logic() {
             }],
             keep_alive_interval: None,
         },
-        mqtt_tx: tx,
-        ha: HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string()),
-        ha_enabled: true,
-        token: token.clone(),
+        tx,
+        &mqtt_config,
+        token.clone(),
         root_cert_store,
         cmd_rx,
-    };
+    );
 
     let token_clone = token.clone();
     let task_handle = tokio::spawn(async move { task.run().await });
@@ -155,8 +163,18 @@ async fn test_successful_poll_logic() {
     let root_cert_store = Arc::new(rustls::RootCertStore::empty());
 
     let (_, cmd_rx) = tokio::sync::broadcast::channel(1);
-    let task = ConnectionTask {
-        config: ConnectionConfig {
+    let mqtt_config = pv2mqtt::config::MqttConfig {
+        url: "mqtt://localhost".to_string(),
+        client_id: "test".to_string(),
+        topic_prefix: "solar".to_string(),
+        ha_prefix: "homeassistant".to_string(),
+        ha_enabled: true,
+        ca_path: None,
+        cert_path: None,
+        key_path: None,
+    };
+    let task = ConnectionTask::<SunSpecInverter>::new(
+        ConnectionConfig {
             name: "test".to_string(),
             modbus: ModbusConfig::Tcp {
                 address: addr_str,
@@ -173,13 +191,12 @@ async fn test_successful_poll_logic() {
             }],
             keep_alive_interval: None,
         },
-        mqtt_tx: tx,
-        ha: HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string()),
-        ha_enabled: true,
-        token: token.clone(),
+        tx,
+        &mqtt_config,
+        token.clone(),
         root_cert_store,
         cmd_rx,
-    };
+    );
 
     let token_clone = token.clone();
     let task_handle = tokio::spawn(async move { task.run().await });
@@ -294,8 +311,18 @@ async fn test_command_execution_logic() {
     let root_cert_store = Arc::new(rustls::RootCertStore::empty());
 
     let (cmd_tx, cmd_rx) = tokio::sync::broadcast::channel(1);
-    let task = ConnectionTask {
-        config: ConnectionConfig {
+    let mqtt_config = pv2mqtt::config::MqttConfig {
+        url: "mqtt://localhost".to_string(),
+        client_id: "test".to_string(),
+        topic_prefix: "solar".to_string(),
+        ha_prefix: "homeassistant".to_string(),
+        ha_enabled: true,
+        ca_path: None,
+        cert_path: None,
+        key_path: None,
+    };
+    let task = ConnectionTask::<SunSpecInverter>::new(
+        ConnectionConfig {
             name: "test".to_string(),
             modbus: ModbusConfig::Tcp {
                 address: addr_str,
@@ -312,13 +339,12 @@ async fn test_command_execution_logic() {
             }],
             keep_alive_interval: None,
         },
-        mqtt_tx: tx,
-        ha: HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string()),
-        ha_enabled: true,
-        token: token.clone(),
+        tx,
+        &mqtt_config,
+        token.clone(),
         root_cert_store,
         cmd_rx,
-    };
+    );
 
     let token_clone = token.clone();
     let task_handle = tokio::spawn(async move { task.run().await });
@@ -416,8 +442,18 @@ async fn test_command_ignored_when_controls_disabled() {
     let root_cert_store = Arc::new(rustls::RootCertStore::empty());
 
     let (cmd_tx, cmd_rx) = tokio::sync::broadcast::channel(1);
-    let task = ConnectionTask {
-        config: ConnectionConfig {
+    let mqtt_config = pv2mqtt::config::MqttConfig {
+        url: "mqtt://localhost".to_string(),
+        client_id: "test".to_string(),
+        topic_prefix: "solar".to_string(),
+        ha_prefix: "homeassistant".to_string(),
+        ha_enabled: true,
+        ca_path: None,
+        cert_path: None,
+        key_path: None,
+    };
+    let task = ConnectionTask::<SunSpecInverter>::new(
+        ConnectionConfig {
             name: "test".to_string(),
             modbus: ModbusConfig::Tcp {
                 address: addr_str,
@@ -434,13 +470,12 @@ async fn test_command_ignored_when_controls_disabled() {
             }],
             keep_alive_interval: None,
         },
-        mqtt_tx: tx,
-        ha: HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string()),
-        ha_enabled: true,
-        token: token.clone(),
+        tx,
+        &mqtt_config,
+        token.clone(),
         root_cert_store,
         cmd_rx,
-    };
+    );
 
     let token_clone = token.clone();
     let task_handle = tokio::spawn(async move { task.run().await });
@@ -502,8 +537,18 @@ async fn test_discovery_disabled_logic() {
     let root_cert_store = Arc::new(rustls::RootCertStore::empty());
 
     let (_, cmd_rx) = tokio::sync::broadcast::channel(1);
-    let task = ConnectionTask {
-        config: ConnectionConfig {
+    let mqtt_config = pv2mqtt::config::MqttConfig {
+        url: "mqtt://localhost".to_string(),
+        client_id: "test".to_string(),
+        topic_prefix: "solar".to_string(),
+        ha_prefix: "homeassistant".to_string(),
+        ha_enabled: false, // DISABLED
+        ca_path: None,
+        cert_path: None,
+        key_path: None,
+    };
+    let task = ConnectionTask::<SunSpecInverter>::new(
+        ConnectionConfig {
             name: "test".to_string(),
             modbus: ModbusConfig::Tcp {
                 address: addr_str,
@@ -520,13 +565,12 @@ async fn test_discovery_disabled_logic() {
             }],
             keep_alive_interval: None,
         },
-        mqtt_tx: tx,
-        ha: HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string()),
-        ha_enabled: false, // DISABLED
-        token: token.clone(),
+        tx,
+        &mqtt_config,
+        token.clone(),
         root_cert_store,
         cmd_rx,
-    };
+    );
 
     let token_clone = token.clone();
     let task_handle = tokio::spawn(async move { task.run().await });
@@ -602,8 +646,18 @@ async fn test_model_704_command_execution_logic() {
     let root_cert_store = Arc::new(rustls::RootCertStore::empty());
 
     let (cmd_tx, cmd_rx) = tokio::sync::broadcast::channel(1);
-    let task = ConnectionTask {
-        config: ConnectionConfig {
+    let mqtt_config = pv2mqtt::config::MqttConfig {
+        url: "mqtt://localhost".to_string(),
+        client_id: "test".to_string(),
+        topic_prefix: "solar".to_string(),
+        ha_prefix: "homeassistant".to_string(),
+        ha_enabled: true,
+        ca_path: None,
+        cert_path: None,
+        key_path: None,
+    };
+    let task = ConnectionTask::<SunSpecInverter>::new(
+        ConnectionConfig {
             name: "test-704".to_string(),
             modbus: ModbusConfig::Tcp {
                 address: addr_str,
@@ -620,13 +674,12 @@ async fn test_model_704_command_execution_logic() {
             }],
             keep_alive_interval: None,
         },
-        mqtt_tx: tx,
-        ha: HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string()),
-        ha_enabled: true,
-        token: token.clone(),
+        tx,
+        &mqtt_config,
+        token.clone(),
         root_cert_store,
         cmd_rx,
-    };
+    );
 
     let token_clone = token.clone();
     let task_handle = tokio::spawn(async move { task.run().await });
@@ -689,8 +742,18 @@ async fn test_discovery_reads_nameplate_and_publishes() {
     let root_cert_store = Arc::new(rustls::RootCertStore::empty());
     let (_, cmd_rx) = tokio::sync::broadcast::channel(1);
 
-    let task = ConnectionTask {
-        config: ConnectionConfig {
+    let mqtt_config = pv2mqtt::config::MqttConfig {
+        url: "mqtt://localhost".to_string(),
+        client_id: "test".to_string(),
+        topic_prefix: "solar".to_string(),
+        ha_prefix: "homeassistant".to_string(),
+        ha_enabled: true,
+        ca_path: None,
+        cert_path: None,
+        key_path: None,
+    };
+    let task = ConnectionTask::<SunSpecInverter>::new(
+        ConnectionConfig {
             name: "test".to_string(),
             modbus: ModbusConfig::Tcp {
                 address: addr_str,
@@ -707,13 +770,12 @@ async fn test_discovery_reads_nameplate_and_publishes() {
             }],
             keep_alive_interval: None,
         },
-        mqtt_tx: tx,
-        ha: HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string()),
-        ha_enabled: true,
-        token: token.clone(),
+        tx,
+        &mqtt_config,
+        token.clone(),
         root_cert_store,
         cmd_rx,
-    };
+    );
 
     let token_clone = token.clone();
     let _task_handle = tokio::spawn(async move { task.run().await });

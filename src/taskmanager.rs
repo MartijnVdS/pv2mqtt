@@ -3,7 +3,7 @@
 use crate::commands::ModbusCommand;
 use crate::config::Config;
 use crate::error::Result;
-use crate::modbus::ConnectionTask;
+use crate::modbus::{ConnectionTask, SunSpecInverter};
 use crate::mqtt::{MqttMessage, MqttTask};
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
@@ -96,7 +96,7 @@ impl TaskManager {
             let cmd_rx = self.cmd_tx.subscribe();
 
             let handle: JoinHandle<()> = tokio::spawn(async move {
-                let task = ConnectionTask::new(
+                let task = ConnectionTask::<SunSpecInverter>::new(
                     conn_config,
                     mqtt_tx,
                     &mqtt_config,

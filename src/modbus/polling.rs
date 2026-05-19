@@ -1,22 +1,24 @@
-use super::{ConnectionTask, DeviceState, POLL_TIMEOUT_SECS};
+// SPDX-License-Identifier: Apache-2.0
+
+use super::{DeviceState, InverterConnection};
 use crate::error::{Pv2MqttError, Result};
-use crate::models::{ActiveControlModel, InverterData, poll_and_apply};
+use crate::homeassistant::HomeAssistantIntegration;
+use crate::models::ActiveControlModel;
 use crate::mqtt::MqttMessage;
 use bytes::BufMut;
 use chrono::Utc;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-use sunspec::client::AsyncDevice;
-use tokio::sync::Mutex;
-use tokio_modbus::client::Context as ModbusContext;
-use tokio_modbus::slave::SlaveContext;
-use tracing::{debug, error, info, warn};
+use std::time::Instant;
+use tracing::{error, info, warn};
 
-impl ConnectionTask {
-    #[tracing::instrument(name="poll", skip(self,device_state,now), fields(unit_id=device_state.config.unit_id))]
+// Define a type alias for the MQTT sender to keep signatures clean
+type MqttTx = tokio::sync::mpsc::Sender<MqttMessage>;
+
+impl<C: InverterConnection> super::ConnectionTask<C> {
+    #[tracing::instrument(name="poll", skip(mqtt_tx, ha, device_state, now), fields(unit_id=device_state.config.unit_id))]
     pub async fn perform_device_poll(
-        &mut self,
-        device_state: &mut DeviceState,
+        mqtt_tx: &MqttTx,
+        ha: &mut HomeAssistantIntegration,
+        device_state: &mut DeviceState<C>,
         now: Instant,
     ) -> Result<()> {
         // ONLY poll if serial number and supported_model are known
@@ -32,46 +34,33 @@ impl ConnectionTask {
             }
         };
 
-        let poll_res = tokio::time::timeout(
-            Duration::from_secs(POLL_TIMEOUT_SECS),
-            self.poll_device(device, model_id),
-        )
-        .await;
-
-        let mut data = match poll_res {
-            Ok(Ok(data)) => data,
-            Ok(Err(e)) => {
-                let pv_err = match e {
-                    Pv2MqttError::Modbus(me) => Pv2MqttError::ModelRead(model_id, me),
-                    _ => e,
-                };
-                error!("Failed to poll: {}", pv_err);
-                let _ = self
-                    .report_status(device_state, serial, "ERROR", Some(&pv_err))
-                    .await;
-                return Err(pv_err);
-            }
-            Err(_) => {
-                let pv_err = Pv2MqttError::Internal(format!("Timeout polling device {}", serial));
-                error!("{}", pv_err);
-                let _ = self
-                    .report_status(device_state, serial, "ERROR", Some(&pv_err))
-                    .await;
-                return Err(pv_err);
-            }
+        let mut data = crate::models::InverterData {
+            timestamp: Utc::now(),
+            ..Default::default()
         };
+
+        if let Err(e) = device.poll(model_id, &mut data).await {
+            let pv_err = match e {
+                Pv2MqttError::Modbus(me) => Pv2MqttError::ModelRead(model_id, me),
+                _ => e,
+            };
+            error!("Failed to poll: {}", pv_err);
+            let _ = Self::report_status(mqtt_tx, ha, device_state, serial, "ERROR", Some(&pv_err))
+                .await;
+            return Err(pv_err);
+        }
 
         info!("Successfully polled (Serial: {})", serial);
 
         // Optionally poll the active control model for status
         match device_state.active_control {
             ActiveControlModel::Model123 { .. } => {
-                if let Err(e) = poll_and_apply(123, device, &mut data).await {
+                if let Err(e) = device.poll(123, &mut data).await {
                     warn!("Failed to poll controls (Model 123) for {}: {}", serial, e);
                 }
             }
             ActiveControlModel::Model704 { .. } => {
-                if let Err(e) = poll_and_apply(704, device, &mut data).await {
+                if let Err(e) = device.poll(704, &mut data).await {
                     warn!("Failed to poll controls (Model 704) for {}: {}", serial, e);
                 }
             }
@@ -87,8 +76,8 @@ impl ConnectionTask {
         let topic = device_state
             .inverter_topic
             .clone()
-            .unwrap_or_else(|| self.ha.inverter_topic(serial));
-        self.mqtt_tx
+            .unwrap_or_else(|| ha.inverter_topic(serial));
+        mqtt_tx
             .send(MqttMessage::Publish {
                 topic,
                 payload,
@@ -96,15 +85,16 @@ impl ConnectionTask {
             })
             .await?;
 
-        self.report_status(device_state, serial, "OK", None).await?;
+        Self::report_status(mqtt_tx, ha, device_state, serial, "OK", None).await?;
 
         device_state.last_poll = Some(now);
         Ok(())
     }
 
-    async fn report_status(
-        &mut self,
-        device_state: &DeviceState,
+    pub async fn report_status(
+        mqtt_tx: &MqttTx,
+        ha: &mut HomeAssistantIntegration,
+        device_state: &DeviceState<C>,
         serial: &str,
         status: &str,
         error: Option<&Pv2MqttError>,
@@ -112,47 +102,13 @@ impl ConnectionTask {
         let status_topic = device_state
             .status_topic
             .clone()
-            .unwrap_or_else(|| self.ha.status_topic(serial));
-        let status_msg = self.ha.generate_status_message(
+            .unwrap_or_else(|| ha.status_topic(serial));
+        let status_msg = ha.generate_status_message(
             status_topic,
             status,
             error,
             device_state.last_success_timestamp.as_ref(),
         );
-        self.mqtt_tx.send(status_msg).await.map_err(Into::into)
-    }
-
-    pub async fn poll_device(
-        &self,
-        device: &AsyncDevice<Arc<Mutex<ModbusContext>>>,
-        model_id: u16,
-    ) -> Result<InverterData> {
-        let mut data = InverterData {
-            timestamp: Utc::now(),
-            ..Default::default()
-        };
-        poll_and_apply(model_id, device, &mut data).await?;
-        Ok(data)
-    }
-
-    pub async fn ping_device(&self, device: &AsyncDevice<Arc<Mutex<ModbusContext>>>) -> Result<()> {
-        use crate::modbus::READ_TIMEOUT_SECS;
-        use tokio_modbus::Slave;
-        use tokio_modbus::client::Reader;
-
-        debug!("Sending keep-alive");
-        let addr = device.models.m1.addr;
-        let mut ctx = device.client.lock().await;
-        ctx.set_slave(Slave(device.slave_id));
-        let _regs = tokio::time::timeout(
-            Duration::from_secs(READ_TIMEOUT_SECS),
-            ctx.read_holding_registers(addr, 2),
-        )
-        .await
-        .map_err(|_| {
-            Pv2MqttError::Internal(format!("Keep-alive timeout for unit {}", device.slave_id))
-        })??;
-
-        Ok(())
+        mqtt_tx.send(status_msg).await.map_err(Into::into)
     }
 }

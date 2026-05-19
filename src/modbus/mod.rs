@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 mod command;
+mod connection;
 mod discovery;
 mod polling;
 mod types;
 
+pub use connection::{DeviceMetadata, InverterConnection, SunSpecInverter};
 pub use types::DeviceState;
 
 use crate::config::{ConnectionConfig, ModbusConfig, Parity};
@@ -13,7 +15,6 @@ use crate::homeassistant::HomeAssistantIntegration;
 use crate::mqtt::MqttMessage;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use sunspec::client::{AsyncClient, Config as SunSpecConfig};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 use tokio::sync::{Mutex, mpsc};
 use tokio_modbus::{
@@ -47,8 +48,9 @@ pub const M704_WMAX_LIM_ENA_OFFSET: u16 = 12;
 pub const M704_WMAX_LIM_PCT_OFFSET: u16 = 13;
 pub const M704_WMAX_LIM_PCT_SF_OFFSET: u16 = 52;
 
-pub struct ConnectionTask {
+pub struct ConnectionTask<C: InverterConnection> {
     pub config: ConnectionConfig,
+    pub devices: Vec<DeviceState<C>>,
     pub mqtt_tx: mpsc::Sender<MqttMessage>,
     pub ha: HomeAssistantIntegration,
     pub ha_enabled: bool,
@@ -57,7 +59,7 @@ pub struct ConnectionTask {
     pub cmd_rx: tokio::sync::broadcast::Receiver<crate::commands::ModbusCommand>,
 }
 
-impl ConnectionTask {
+impl<C: InverterConnection> ConnectionTask<C> {
     pub fn new(
         config: ConnectionConfig,
         mqtt_tx: mpsc::Sender<MqttMessage>,
@@ -66,8 +68,15 @@ impl ConnectionTask {
         root_cert_store: Arc<rustls::RootCertStore>,
         cmd_rx: tokio::sync::broadcast::Receiver<crate::commands::ModbusCommand>,
     ) -> Self {
+        let devices = config
+            .devices
+            .iter()
+            .map(|d| DeviceState::new(d.clone()))
+            .collect();
+
         Self {
             config,
+            devices,
             mqtt_tx,
             ha: HomeAssistantIntegration::new(
                 mqtt_config.topic_prefix.clone(),
@@ -81,19 +90,23 @@ impl ConnectionTask {
     }
 
     #[tracing::instrument(name="connection", skip(self), fields(name=self.config.name))]
-    pub async fn run(mut self) -> Result<()> {
+    pub async fn run(self) -> Result<()> {
         info!("Starting connection task");
 
-        let mut devices: Vec<DeviceState> = self
-            .config
-            .devices
-            .iter()
-            .map(|d| DeviceState::new(d.clone()))
-            .collect();
+        let ConnectionTask {
+            config,
+            mut devices,
+            mqtt_tx,
+            mut ha,
+            ha_enabled,
+            token,
+            root_cert_store,
+            cmd_rx,
+        } = self;
 
         let mut first_run = true;
 
-        while !self.token.is_cancelled() {
+        while !token.is_cancelled() {
             for device_state in devices.iter_mut() {
                 device_state.clear_connection();
                 device_state.last_poll = None;
@@ -104,11 +117,20 @@ impl ConnectionTask {
             }
 
             let result: Result<()> = async {
-                let ctx = self.establish_connection().await?;
+                let ctx = Self::establish_connection(&config, Arc::clone(&root_cert_store)).await?;
                 let ctx = Arc::new(Mutex::new(ctx));
 
-                self.run_polling_loop(ctx, &mut devices, self.cmd_rx.resubscribe())
-                    .await?;
+                Self::run_polling_loop(
+                    &config,
+                    &mqtt_tx,
+                    &mut ha,
+                    ha_enabled,
+                    &token,
+                    ctx,
+                    &mut devices,
+                    cmd_rx.resubscribe(),
+                )
+                .await?;
                 Ok(())
             }
             .await;
@@ -125,7 +147,7 @@ impl ConnectionTask {
 
                 tokio::select! {
                     biased;
-                    _ = self.token.cancelled() => break,
+                    _ = token.cancelled() => break,
                     _ = tokio::time::sleep(Duration::from_secs(RECONNECT_TIMEOUT_SECS)) => {}
                 }
             }
@@ -136,26 +158,23 @@ impl ConnectionTask {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn run_polling_loop(
-        &mut self,
+        config: &ConnectionConfig,
+        mqtt_tx: &mpsc::Sender<MqttMessage>,
+        ha: &mut HomeAssistantIntegration,
+        ha_enabled: bool,
+        token: &CancellationToken,
         ctx: Arc<Mutex<ModbusContext>>,
-        devices: &mut [DeviceState],
+        devices: &mut [DeviceState<C>],
         mut cmd_rx: tokio::sync::broadcast::Receiver<crate::commands::ModbusCommand>,
     ) -> Result<()> {
-        let client = AsyncClient::new(
-            ctx.clone(),
-            SunSpecConfig {
-                read_timeout: None,
-                ..SunSpecConfig::default()
-            },
-        );
-
         let mut last_activity = Instant::now();
-        let keep_alive_interval = self.config.keep_alive_interval.unwrap_or(30);
+        let keep_alive_interval = config.keep_alive_interval.unwrap_or(30);
         let keep_alive_duration = Duration::from_secs(keep_alive_interval);
 
         loop {
-            let next_wakeup = self.calculate_next_wakeup(
+            let next_wakeup = Self::calculate_next_wakeup(
                 devices,
                 last_activity,
                 keep_alive_duration,
@@ -168,14 +187,14 @@ impl ConnectionTask {
 
             tokio::select! {
                 biased;
-                _ = self.token.cancelled() => {
+                _ = token.cancelled() => {
                     info!("Shutting down polling loop");
                     return Ok(());
                 }
                 res = cmd_rx.recv() => {
                     match res {
                         Ok(cmd) => {
-                            self.handle_command(&ctx, devices, cmd).await;
+                            Self::handle_command(devices, cmd).await;
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                             warn!("Command channel lagged by {} messages", n);
@@ -188,24 +207,23 @@ impl ConnectionTask {
                 _ = tokio::time::sleep(sleep_duration) => {}
             }
 
-            if let Some(new_last_activity) = self
-                .perform_keep_alive(
-                    devices,
-                    last_activity,
-                    keep_alive_duration,
-                    keep_alive_interval,
-                )
-                .await?
+            if let Some(new_last_activity) = Self::perform_keep_alive(
+                devices,
+                last_activity,
+                keep_alive_duration,
+                keep_alive_interval,
+            )
+            .await?
             {
                 last_activity = new_last_activity;
             }
 
             let now = Instant::now();
             for device_state in devices.iter_mut() {
-                if self.token.is_cancelled() {
+                if token.is_cancelled() {
                     break;
                 }
-                if self.process_device(device_state, &client, now).await? {
+                if Self::process_device(mqtt_tx, ha, ha_enabled, device_state, ctx.clone(), now).await? {
                     last_activity = Instant::now();
                 }
             }
@@ -213,8 +231,7 @@ impl ConnectionTask {
     }
 
     fn calculate_next_wakeup(
-        &self,
-        devices: &[DeviceState],
+        devices: &[DeviceState<C>],
         last_activity: Instant,
         keep_alive_duration: Duration,
         keep_alive_interval: u64,
@@ -239,8 +256,7 @@ impl ConnectionTask {
     }
 
     async fn perform_keep_alive(
-        &self,
-        devices: &[DeviceState],
+        devices: &[DeviceState<C>],
         last_activity: Instant,
         keep_alive_duration: Duration,
         keep_alive_interval: u64,
@@ -248,21 +264,21 @@ impl ConnectionTask {
         let now = Instant::now();
         if keep_alive_interval > 0
             && now.duration_since(last_activity) >= keep_alive_duration
-            && let Some((state, device)) = devices
-                .iter()
-                .find_map(|d| d.device.as_ref().map(|dev| (d, dev)))
+            && let Some(device) = devices.iter().find_map(|d| d.device.as_ref())
         {
-            let ping_span = info_span!("keep_alive", unit_id = state.config.unit_id);
-            self.ping_device(device).instrument(ping_span).await?;
+            let ping_span = info_span!("keep_alive", unit_id = device.slave_id());
+            device.ping().instrument(ping_span).await?;
             return Ok(Some(Instant::now()));
         }
         Ok(None)
     }
 
     async fn process_device(
-        &mut self,
-        device_state: &mut DeviceState,
-        client: &AsyncClient<Arc<Mutex<ModbusContext>>>,
+        mqtt_tx: &mpsc::Sender<MqttMessage>,
+        ha: &mut HomeAssistantIntegration,
+        ha_enabled: bool,
+        device_state: &mut DeviceState<C>,
+        ctx: Arc<Mutex<ModbusContext>>,
         now: Instant,
     ) -> Result<bool> {
         let interval = Duration::from_secs(device_state.config.interval);
@@ -274,12 +290,12 @@ impl ConnectionTask {
         if next_poll <= now {
             device_state.last_poll = Some(now);
             let res = if device_state.device.is_none() {
-                match self.discover_device(client, device_state).await {
-                    Ok(_) => self.perform_device_poll(device_state, now).await,
+                match Self::discover_device(mqtt_tx, ha, ha_enabled, ctx, device_state).await {
+                    Ok(_) => Self::perform_device_poll(mqtt_tx, ha, device_state, now).await,
                     Err(e) => Err(e),
                 }
             } else {
-                self.perform_device_poll(device_state, now).await
+                Self::perform_device_poll(mqtt_tx, ha, device_state, now).await
             };
 
             if let Err(e) = res {
@@ -296,9 +312,84 @@ impl ConnectionTask {
         Ok(false)
     }
 
+    async fn establish_connection(
+        config: &ConnectionConfig,
+        root_cert_store: Arc<rustls::RootCertStore>,
+    ) -> Result<ModbusContext> {
+        match &config.modbus {
+            ModbusConfig::Tcp {
+                address,
+                tls,
+                ca_path,
+                cert_path,
+                key_path,
+            } => {
+                info!("Connecting to Modbus TCP at {} (TLS: {})", address, tls);
+                let tcp_stream = tokio::time::timeout(
+                    Duration::from_secs(CONNECT_TIMEOUT_SECS),
+                    tokio::net::TcpStream::connect(address),
+                )
+                .await
+                .map_err(|_| {
+                    ModbusError::Timeout(format!("Timeout connecting to {}", address))
+                })??;
+
+                tcp_stream.set_nodelay(true)?;
+
+                let mut stream = if *tls {
+                    let tls_stream = Self::connect_tls(
+                        &root_cert_store,
+                        tcp_stream,
+                        address,
+                        ca_path.as_deref(),
+                        cert_path.as_deref(),
+                        key_path.as_deref(),
+                    )
+                    .await?;
+                    either::Either::Left(tls_stream)
+                } else {
+                    either::Either::Right(tcp_stream)
+                };
+
+                Self::drain_stale_data(&mut stream).await?;
+
+                Ok(tcp::attach(stream))
+            }
+            ModbusConfig::Rtu {
+                device,
+                baud_rate,
+                parity,
+                stop_bits,
+            } => {
+                info!(
+                    "Connecting to Modbus RTU at {} ({} baud, parity: {:?})",
+                    device, baud_rate, parity
+                );
+
+                let stop = match stop_bits {
+                    1 => tokio_serial::StopBits::One,
+                    2 => tokio_serial::StopBits::Two,
+                    _ => tokio_serial::StopBits::One,
+                };
+
+                let builder = tokio_serial::new(device, *baud_rate)
+                    .parity(match parity {
+                        Parity::None => tokio_serial::Parity::None,
+                        Parity::Even => tokio_serial::Parity::Even,
+                        Parity::Odd => tokio_serial::Parity::Odd,
+                    })
+                    .stop_bits(stop);
+
+                let port = SerialStream::open(&builder)
+                    .map_err(|e| ModbusError::Io(std::io::Error::other(e)))?;
+                Ok(rtu::attach_slave(port, Slave(0)))
+            }
+        }
+    }
+
     // Set up TLS on a TCP connection
     async fn connect_tls(
-        &self,
+        root_cert_store: &Arc<rustls::RootCertStore>,
         stream: tokio::net::TcpStream,
         address: &String,
         ca_path: Option<&str>,
@@ -306,7 +397,7 @@ impl ConnectionTask {
         key_path: Option<&str>,
     ) -> Result<tokio_rustls::client::TlsStream<tokio::net::TcpStream>> {
         let client_config = crate::tls::create_client_config(
-            Arc::clone(&self.root_cert_store),
+            Arc::clone(root_cert_store),
             ca_path,
             cert_path,
             key_path,
@@ -331,7 +422,7 @@ impl ConnectionTask {
         Ok(tls_stream)
     }
 
-    async fn drain_stale_data<T>(&self, stream: &mut T) -> Result<()>
+    async fn drain_stale_data<T>(stream: &mut T) -> Result<()>
     where
         T: AsyncRead + AsyncWrite + Send + Unpin,
     {
@@ -358,78 +449,6 @@ impl ConnectionTask {
         }
 
         Ok(())
-    }
-
-    async fn establish_connection(&self) -> Result<ModbusContext> {
-        match &self.config.modbus {
-            ModbusConfig::Tcp {
-                address,
-                tls,
-                ca_path,
-                cert_path,
-                key_path,
-            } => {
-                info!("Connecting to Modbus TCP at {} (TLS: {})", address, tls);
-                let tcp_stream = tokio::time::timeout(
-                    Duration::from_secs(CONNECT_TIMEOUT_SECS),
-                    tokio::net::TcpStream::connect(address),
-                )
-                .await
-                .map_err(|_| {
-                    ModbusError::Timeout(format!("Timeout connecting to {}", address))
-                })??;
-
-                tcp_stream.set_nodelay(true)?;
-
-                let mut stream = if *tls {
-                    let tls_stream = self
-                        .connect_tls(
-                            tcp_stream,
-                            address,
-                            ca_path.as_deref(),
-                            cert_path.as_deref(),
-                            key_path.as_deref(),
-                        )
-                        .await?;
-                    either::Either::Left(tls_stream)
-                } else {
-                    either::Either::Right(tcp_stream)
-                };
-
-                self.drain_stale_data(&mut stream).await?;
-
-                Ok(tcp::attach(stream))
-            }
-            ModbusConfig::Rtu {
-                device,
-                baud_rate,
-                parity,
-                stop_bits,
-            } => {
-                info!(
-                    "Connecting to Modbus RTU at {} ({} baud, parity: {:?})",
-                    device, baud_rate, parity
-                );
-
-                let stop = match stop_bits {
-                    1 => tokio_serial::StopBits::One,
-                    2 => tokio_serial::StopBits::Two,
-                    _ => tokio_serial::StopBits::One, // Default fallback, should never happen
-                };
-
-                let builder = tokio_serial::new(device, *baud_rate)
-                    .parity(match parity {
-                        Parity::None => tokio_serial::Parity::None,
-                        Parity::Even => tokio_serial::Parity::Even,
-                        Parity::Odd => tokio_serial::Parity::Odd,
-                    })
-                    .stop_bits(stop);
-
-                let port = SerialStream::open(&builder)
-                    .map_err(|e| ModbusError::Io(std::io::Error::other(e)))?;
-                Ok(rtu::attach_slave(port, Slave(0)))
-            }
-        }
     }
 }
 

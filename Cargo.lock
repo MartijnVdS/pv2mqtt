@@ -31,9 +31,9 @@ dependencies = [
 
 [[package]]
 name = "asn1-rs"
-version = "0.7.1"
+version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56624a96882bb8c26d61312ae18cb45868e5a9992ea73c58e45c3101e56a1e60"
+checksum = "b7f43a50ac4fdca5df8e885c21b835997f0a1cdee65494a6847694a98652d9d8"
 dependencies = [
  "asn1-rs-derive",
  "asn1-rs-impl",
@@ -808,9 +808,9 @@ dependencies = [
 
 [[package]]
 name = "mqttbytes-core-next"
-version = "0.33.0"
+version = "0.33.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2558e8a9dd1e9ad2e771384ed983216741f60e21e5974b43b41f9980bff3e3d7"
+checksum = "199b7cddf2d1bba6248d9dbaf1e58c91cd3ab05f52559b566c9d75ff303f887b"
 dependencies = [
  "bytes",
  "thiserror",
@@ -970,7 +970,7 @@ dependencies = [
 
 [[package]]
 name = "pv2mqtt"
-version = "1.6.1"
+version = "1.6.2"
 dependencies = [
  "approx",
  "bytes",
@@ -1087,9 +1087,9 @@ dependencies = [
 
 [[package]]
 name = "rumqttc-core-next"
-version = "0.33.0"
+version = "0.33.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8a93655cd2d9d3faf7e039caa4eb39d9f4b49c336ade913c92655031c9fca71"
+checksum = "660f3b3e2dc9e138e53c4db7f0ec42fe3386c751ccdff2fbd1d075a4149254cd"
 dependencies = [
  "async-tungstenite",
  "rustls-native-certs",
@@ -1102,18 +1102,18 @@ dependencies = [
 
 [[package]]
 name = "rumqttc-next"
-version = "0.33.0"
+version = "0.33.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b6cd37028e449ffb206a1ddc60086a1a5bac578b45be91b487dccb47a930334"
+checksum = "e101c834b5ad0c5c82c5bcc7ac0b0dca70baba92fe7b903f441b87bef1f45387"
 dependencies = [
  "rumqttc-v5-next",
 ]
 
 [[package]]
 name = "rumqttc-v5-next"
-version = "0.33.0"
+version = "0.33.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "796245ad9ebd2b301ed20263ccf0ee430b6bc511b3ece7f815288a72d393e763"
+checksum = "d965c65b95e12ed1cb564c2fa5fd70e3f3885b812f7429de6e5ff22f090e27f1"
 dependencies = [
  "async-tungstenite",
  "bytes",
@@ -2024,9 +2024,9 @@ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 
 [[package]]
 name = "winnow"
-version = "1.0.2"
+version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ee1708bef14716a11bae175f579062d4554d95be2c6829f518df847b7b3fdd0"
+checksum = "0592e1c9d151f854e6fd382574c3a0855250e1d9b2f99d9281c6e6391af352f1"
 
 [[package]]
 name = "wit-bindgen"

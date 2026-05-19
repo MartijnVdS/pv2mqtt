@@ -2,8 +2,7 @@
 
 use crate::common::modbus_server;
 use pv2mqtt::config::{ConnectionConfig, DeviceConfig, ModbusConfig};
-use pv2mqtt::homeassistant::HomeAssistantIntegration;
-use pv2mqtt::modbus::ConnectionTask;
+use pv2mqtt::modbus::{ConnectionTask, SunSpecInverter};
 use rcgen::generate_simple_self_signed;
 use std::fs;
 use std::sync::Arc;
@@ -53,8 +52,18 @@ async fn test_tls_handshake_failure() {
     let root_cert_store = Arc::new(rustls::RootCertStore::empty());
 
     let (_, cmd_rx) = tokio::sync::broadcast::channel(1);
-    let task = ConnectionTask {
-        config: ConnectionConfig {
+    let mqtt_config = pv2mqtt::config::MqttConfig {
+        url: "mqtt://localhost".to_string(),
+        client_id: "test".to_string(),
+        topic_prefix: "solar".to_string(),
+        ha_prefix: "homeassistant".to_string(),
+        ha_enabled: true,
+        ca_path: None,
+        cert_path: None,
+        key_path: None,
+    };
+    let task = ConnectionTask::<SunSpecInverter>::new(
+        ConnectionConfig {
             name: "tls_test".to_string(),
             modbus: ModbusConfig::Tcp {
                 address: addr_str,
@@ -71,13 +80,12 @@ async fn test_tls_handshake_failure() {
             }],
             keep_alive_interval: None,
         },
-        mqtt_tx: tx,
-        ha: HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string()),
-        ha_enabled: true,
-        token: token.clone(),
+        tx,
+        &mqtt_config,
+        token.clone(),
         root_cert_store,
         cmd_rx,
-    };
+    );
 
     let _task_handle = tokio::spawn(async move { task.run().await });
 

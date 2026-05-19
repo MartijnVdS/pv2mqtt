@@ -1,14 +1,12 @@
+use super::InverterConnection;
 use crate::config::DeviceConfig;
 use crate::models::ActiveControlModel;
 use chrono::{DateTime, Utc};
 use std::sync::Arc;
 use std::time::Instant;
-use sunspec::client::AsyncDevice;
-use tokio::sync::Mutex;
-use tokio_modbus::client::Context as ModbusContext;
 
 #[derive(Clone)]
-pub struct DeviceState {
+pub struct DeviceState<C: InverterConnection> {
     pub config: DeviceConfig,
     pub last_poll: Option<Instant>,
     pub last_success_timestamp: Option<DateTime<Utc>>,
@@ -18,7 +16,7 @@ pub struct DeviceState {
     pub version: Option<String>,
     pub supported_model: Option<u16>,
     pub active_control: ActiveControlModel,
-    pub device: Option<Arc<AsyncDevice<Arc<Mutex<ModbusContext>>>>>,
+    pub device: Option<Arc<C>>,
     pub inverter_topic: Option<Arc<str>>,
     pub status_topic: Option<Arc<str>>,
     pub nameplate_topic: Option<Arc<str>>,
@@ -26,7 +24,7 @@ pub struct DeviceState {
     pub serialization_buffer: bytes::BytesMut,
 }
 
-impl DeviceState {
+impl<C: InverterConnection> DeviceState<C> {
     pub fn new(config: DeviceConfig) -> Self {
         Self {
             config,

@@ -16,10 +16,7 @@ pub use traits::*;
 pub use types::*;
 
 use crate::error::{Pv2MqttError, Result};
-use std::sync::Arc;
-use sunspec::client::AsyncDevice;
-use tokio::sync::Mutex;
-use tokio_modbus::client::Context as ModbusContext;
+use crate::modbus::InverterConnection;
 
 pub static SUPPORTED_INVERTER_DATA_MODELS: &[u16] = &[701, 101, 102, 103, 111, 112, 113];
 
@@ -27,9 +24,9 @@ pub static SUPPORTED_INVERTER_DATA_MODELS: &[u16] = &[701, 101, 102, 103, 111, 1
 /// Uses a mutable reference because SunSpec devices often represent a single inverter
 /// across multiple models (e.g., electrical data in 103, controls in 123), and this allows
 /// us to additively compose the final data structure without complex merging or reallocations.
-pub async fn poll_and_apply(
+pub async fn poll_and_apply<C: InverterConnection>(
     model_id: u16,
-    device: &AsyncDevice<Arc<Mutex<ModbusContext>>>,
+    device: &C,
     data: &mut InverterData,
 ) -> Result<()> {
     match model_id {
