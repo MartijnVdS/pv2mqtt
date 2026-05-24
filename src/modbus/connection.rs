@@ -311,24 +311,55 @@ impl InverterConnection for SunSpecInverter {
     }
 
     async fn write_registers(&self, addr: u16, data: &[u16]) -> Result<()> {
-        self.device
-            .client
-            .write_registers(self.device.slave_id, addr, data)
-            .await?;
+        tokio::time::timeout(
+            Duration::from_secs(POLL_TIMEOUT_SECS),
+            self.device
+                .client
+                .write_registers(self.device.slave_id, addr, data),
+        )
+        .await
+        .map_err(|_| {
+            Pv2MqttError::Modbus(ModbusError::Timeout(format!(
+                "Timeout writing registers for unit {}",
+                self.device.slave_id
+            )))
+        })??;
         Ok(())
     }
 
     async fn read_registers(&self, addr: u16, count: u16) -> Result<Vec<u16>> {
-        let regs = self
-            .device
-            .client
-            .read_registers(self.device.slave_id, addr, count)
-            .await?;
+        let regs = tokio::time::timeout(
+            Duration::from_secs(POLL_TIMEOUT_SECS),
+            self.device
+                .client
+                .read_registers(self.device.slave_id, addr, count),
+        )
+        .await
+        .map_err(|_| {
+            Pv2MqttError::Modbus(ModbusError::Timeout(format!(
+                "Timeout reading registers for unit {}",
+                self.device.slave_id
+            )))
+        })??;
         Ok(regs)
     }
 
     async fn read_model<M: sunspec::Model + Send + Sync>(&self) -> Result<M> {
-        self.device.read_model::<M>().await.map_err(Into::into)
+        let res = tokio::time::timeout(
+            Duration::from_secs(POLL_TIMEOUT_SECS),
+            self.device.read_model::<M>(),
+        )
+        .await;
+
+        match res {
+            Ok(Ok(m)) => Ok(m),
+            Ok(Err(e)) => Err(e.into()),
+            Err(_) => Err(Pv2MqttError::Modbus(ModbusError::Timeout(format!(
+                "Timeout reading Model {} for unit {}",
+                M::ID,
+                self.device.slave_id
+            )))),
+        }
     }
 }
 
