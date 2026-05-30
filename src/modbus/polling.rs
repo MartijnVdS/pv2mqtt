@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use super::{DeviceState, InverterConnection};
+use super::{ConnectionTask, DeviceState, InverterConnection};
 use crate::error::{Pv2MqttError, Result};
 use crate::homeassistant::HomeAssistantIntegration;
 use crate::models::ActiveControlModel;
@@ -13,7 +13,7 @@ use tracing::{error, info, warn};
 // Define a type alias for the MQTT sender to keep signatures clean
 type MqttTx = tokio::sync::mpsc::Sender<MqttMessage>;
 
-impl<C: InverterConnection> super::ConnectionTask<C> {
+impl<C: InverterConnection> ConnectionTask<C> {
     pub async fn perform_device_poll(
         mqtt_tx: &MqttTx,
         ha: &mut HomeAssistantIntegration,

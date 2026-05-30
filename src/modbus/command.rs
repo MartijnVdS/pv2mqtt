@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::{
-    COMMAND_POLL_DELAY_MILLIS, DeviceState, InverterConnection, M123_CONN_OFFSET,
+    COMMAND_POLL_DELAY_MILLIS, ConnectionTask, DeviceState, InverterConnection, M123_CONN_OFFSET,
     M123_WMAX_LIM_ENA_OFFSET, M123_WMAX_LIM_PCT_OFFSET, M123_WMAX_LIM_PCT_SF_OFFSET,
     M704_WMAX_LIM_ENA_OFFSET, M704_WMAX_LIM_PCT_OFFSET, M704_WMAX_LIM_PCT_SF_OFFSET,
 };
@@ -11,7 +11,7 @@ use crate::models::ActiveControlModel;
 use std::time::Duration;
 use tracing::{debug, error, info, warn};
 
-impl<C: InverterConnection> super::ConnectionTask<C> {
+impl<C: InverterConnection> ConnectionTask<C> {
     pub async fn handle_command(
         devices: &mut [DeviceState<C>],
         cmd: crate::commands::ModbusCommand,

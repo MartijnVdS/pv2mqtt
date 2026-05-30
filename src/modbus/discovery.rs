@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use super::{DeviceState, InverterConnection};
+use super::{ConnectionTask, DeviceState, InverterConnection};
 use crate::error::Result;
 use crate::homeassistant::HomeAssistantIntegration;
 use crate::mqtt::MqttMessage;
@@ -11,7 +11,7 @@ use tracing::{Instrument, info, info_span};
 
 type MqttTx = tokio::sync::mpsc::Sender<MqttMessage>;
 
-impl<C: InverterConnection> super::ConnectionTask<C> {
+impl<C: InverterConnection> ConnectionTask<C> {
     pub async fn discover_device(
         mqtt_tx: &MqttTx,
         ha: &HomeAssistantIntegration,
