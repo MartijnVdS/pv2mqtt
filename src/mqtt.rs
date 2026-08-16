@@ -4,8 +4,8 @@ use crate::commands::{ControlAction, ModbusCommand};
 use crate::config::MqttConfig;
 use crate::error::{Pv2MqttError, Result};
 use rumqttc::{
-    AsyncClient, Event, EventLoop, Incoming, MqttOptions, Outgoing, QoS, TlsConfiguration,
-    Transport,
+    AsyncClient, Event, EventLoop, Incoming, MqttOptions, Outgoing, PublishOptions, QoS,
+    TlsConfiguration, Transport,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -237,10 +237,9 @@ impl MqttTask {
                         topic,
                         String::from_utf8_lossy(&payload)
                     );
-                    if let Err(e) = client
-                        .publish(&*topic, QoS::AtLeastOnce, retain, payload)
-                        .await
-                    {
+
+                    let options = PublishOptions::new(QoS::AtLeastOnce).retain(retain);
+                    if let Err(e) = client.publish(&*topic, payload, options).await {
                         let pv_err = Pv2MqttError::MqttPublish(e.to_string());
                         error!("{}", pv_err);
                     }
