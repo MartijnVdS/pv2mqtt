@@ -292,12 +292,18 @@ impl InverterConnection for SunSpecInverter {
 
     async fn ping(&self) -> Result<()> {
         debug!("Sending keep-alive");
+        // Read the complete Common model (Model 1) block. Some inverters (e.g. SMA)
+        // reject partial reads that start inside a multi-register field with an
+        // "Illegal data address" exception, so we mirror the metadata read which is
+        // known to succeed instead of reading an arbitrary 2-register slice.
         let addr = self.device.models.m1.addr;
+        debug!("Sending keep-alive to {}", addr);
+        let len = self.device.models.m1.len;
         let _regs = tokio::time::timeout(
             Duration::from_secs(READ_TIMEOUT_SECS),
             self.device
                 .client
-                .read_registers(self.device.slave_id, addr, 2),
+                .read_registers(self.device.slave_id, addr, len),
         )
         .await
         .map_err(|_| {
