@@ -1,6 +1,6 @@
 [package]
 name = "pv2mqtt"
-version = "1.6.3"
+version = "1.6.6"
 edition = "2024"
 
 [lints.rust]
